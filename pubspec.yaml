@@ -32,9 +32,12 @@ dependencies:
     sdk: flutter
 
   flutter_blue_plus: ^2.3.12
+  flutter_map: ^8.3.1
+  flutter_map_mbtiles: ^1.0.4
+  latlong2: ^0.9.1
+  path_provider: ^2.1.5
   geolocator:
-  flutter_map:
-  latlong2:
+
   #shared_preferences:
   #sqflite:
   #permission_handler:
@@ -63,6 +66,8 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/maps/noida.mbtiles
 
   # To add assets to your application, add an assets section, like this:
   # assets:

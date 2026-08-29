@@ -1,8 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
+import 'package:latlong2/latlong.dart' show LatLng;
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const LoraTrackerApp());
@@ -65,10 +71,514 @@ class LoraTrackerApp extends StatelessWidget {
         ),
       ),
 
-      home: const DevicePage(),
+      home: const SplashScreen(),
     );
   }
 }
+
+
+// ============================================================
+// SPLASH SCREEN
+// ============================================================
+
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulseController;
+  late final Animation<double> _pulseAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(
+      begin: 0.88,
+      end: 1.08,
+    ).animate(
+      CurvedAnimation(
+        parent: _pulseController,
+        curve: Curves.easeInOut,
+      ),
+    );
+
+    _openMainPage();
+  }
+
+  Future<void> _openMainPage() async {
+    await Future.delayed(const Duration(milliseconds: 2800));
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (_, __, ___) => const DevicePage(),
+        transitionDuration: const Duration(milliseconds: 550),
+        transitionsBuilder: (_, animation, __, child) {
+          return FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+            ),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF06172B),
+              Color(0xFF0A2A4A),
+              Color(0xFF03111F),
+            ],
+          ),
+        ),
+        child: Stack(
+          children: [
+            // Subtle radar/signal rings.
+            Positioned(
+              top: -70,
+              right: -80,
+              child: _SplashGlow(
+                size: 270,
+                opacity: 0.10,
+              ),
+            ),
+
+            Positioned(
+              top: 115,
+              left: -105,
+              child: _SplashGlow(
+                size: 220,
+                opacity: 0.07,
+              ),
+            ),
+
+            // Small stars / signal points.
+            const Positioned(
+              top: 92,
+              left: 38,
+              child: _SplashDot(size: 3),
+            ),
+            const Positioned(
+              top: 150,
+              right: 48,
+              child: _SplashDot(size: 2),
+            ),
+            const Positioned(
+              top: 235,
+              left: 72,
+              child: _SplashDot(size: 2),
+            ),
+            const Positioned(
+              top: 305,
+              right: 32,
+              child: _SplashDot(size: 3),
+            ),
+
+            SafeArea(
+              child: Column(
+                children: [
+                  const Spacer(flex: 2),
+
+                  // Main LoRa signal / location icon.
+                  ScaleTransition(
+                    scale: _pulseAnimation,
+                    child: Container(
+                      width: 118,
+                      height: 118,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF0C365A),
+                        border: Border.all(
+                          color: const Color(0xFF3EBBFF)
+                              .withOpacity(0.45),
+                          width: 1.2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF19B9FF)
+                                .withOpacity(0.20),
+                            blurRadius: 32,
+                            spreadRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            width: 86,
+                            height: 86,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0xFF29B6F6)
+                                    .withOpacity(0.24),
+                              ),
+                            ),
+                          ),
+                          const Icon(
+                            Icons.location_on_rounded,
+                            size: 54,
+                            color: Colors.white,
+                          ),
+                          const Positioned(
+                            top: 14,
+                            child: Icon(
+                              Icons.wifi_tethering_rounded,
+                              size: 30,
+                              color: Color(0xFF35C4FF),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // Project title.
+                  RichText(
+                    text: const TextSpan(
+                      style: TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.8,
+                      ),
+                      children: [
+                        TextSpan(
+                          text: 'LoRa ',
+                          style: TextStyle(
+                            color: Color(0xFF27C2FF),
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'Tracker',
+                          style: TextStyle(
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 9),
+
+                  const Text(
+                    'Track. Connect. Explore.',
+                    style: TextStyle(
+                      color: Color(0xFFB8D8EA),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+
+                  const Spacer(flex: 1),
+
+                  // Adventurous mountain / radio tower illustration.
+                  SizedBox(
+                    height: 175,
+                    width: double.infinity,
+                    child: CustomPaint(
+                      painter: _SplashLandscapePainter(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 4),
+
+                  // Loading indicator.
+                  Column(
+                    children: [
+                      const SizedBox(
+                        width: 170,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.all(
+                            Radius.circular(20),
+                          ),
+                          child: LinearProgressIndicator(
+                            minHeight: 4,
+                            backgroundColor: Color(0xFF21415B),
+                            valueColor:
+                            AlwaysStoppedAnimation<Color>(
+                              Color(0xFF27C2FF),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Establishing connection...',
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.72),
+                          fontSize: 11,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const Spacer(flex: 1),
+
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 24),
+                    child: Text(
+                      'LONG RANGE • LOW POWER • CONNECTED',
+                      style: TextStyle(
+                        color: Color(0xFF6E9AB3),
+                        fontSize: 9,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SplashGlow extends StatelessWidget {
+  final double size;
+  final double opacity;
+
+  const _SplashGlow({
+    required this.size,
+    required this.opacity,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: const Color(0xFF2FBFFF).withOpacity(opacity),
+          width: 1.5,
+        ),
+      ),
+    );
+  }
+}
+
+class _SplashDot extends StatelessWidget {
+  final double size;
+
+  const _SplashDot({
+    required this.size,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Color(0xFF55CFFF),
+      ),
+    );
+  }
+}
+
+class _SplashLandscapePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final groundY = size.height * 0.78;
+
+    // Far mountain range.
+    final farMountain = Paint()
+      ..color = const Color(0xFF143B59)
+      ..style = PaintingStyle.fill;
+
+    final farPath = Path()
+      ..moveTo(0, groundY)
+      ..lineTo(size.width * 0.18, size.height * 0.38)
+      ..lineTo(size.width * 0.30, size.height * 0.60)
+      ..lineTo(size.width * 0.46, size.height * 0.28)
+      ..lineTo(size.width * 0.62, size.height * 0.60)
+      ..lineTo(size.width * 0.78, size.height * 0.40)
+      ..lineTo(size.width, size.height * 0.67)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    canvas.drawPath(farPath, farMountain);
+
+    // Front mountain range.
+    final frontMountain = Paint()
+      ..color = const Color(0xFF09263E)
+      ..style = PaintingStyle.fill;
+
+    final frontPath = Path()
+      ..moveTo(0, groundY + 10)
+      ..lineTo(size.width * 0.23, size.height * 0.57)
+      ..lineTo(size.width * 0.38, size.height * 0.75)
+      ..lineTo(size.width * 0.55, size.height * 0.47)
+      ..lineTo(size.width * 0.70, size.height * 0.72)
+      ..lineTo(size.width * 0.84, size.height * 0.54)
+      ..lineTo(size.width, size.height * 0.75)
+      ..lineTo(size.width, size.height)
+      ..lineTo(0, size.height)
+      ..close();
+
+    canvas.drawPath(frontPath, frontMountain);
+
+    // Radio tower.
+    final towerPaint = Paint()
+      ..color = const Color(0xFF6D9AB3)
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke;
+
+    final towerX = size.width * 0.50;
+    final towerTop = size.height * 0.13;
+    final towerBottom = size.height * 0.82;
+
+    canvas.drawLine(
+      Offset(towerX, towerTop),
+      Offset(towerX - 25, towerBottom),
+      towerPaint,
+    );
+
+    canvas.drawLine(
+      Offset(towerX, towerTop),
+      Offset(towerX + 25, towerBottom),
+      towerPaint,
+    );
+
+    for (var i = 0; i < 5; i++) {
+      final y = towerTop + 18 + (i * 15.0);
+      final halfWidth = 5 + (i * 4.0);
+
+      canvas.drawLine(
+        Offset(towerX - halfWidth, y),
+        Offset(towerX + halfWidth, y),
+        towerPaint,
+      );
+    }
+
+    // Antenna.
+    final antennaPaint = Paint()
+      ..color = const Color(0xFF35C4FF)
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawLine(
+      Offset(towerX, towerTop),
+      Offset(towerX, towerTop - 17),
+      antennaPaint,
+    );
+
+    // Radio signal arcs.
+    final signalPaint = Paint()
+      ..color = const Color(0xFF35C4FF).withOpacity(0.75)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+
+    final signalCenter = Offset(
+      towerX,
+      towerTop - 10,
+    );
+
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: signalCenter,
+        radius: 17,
+      ),
+      -2.35,
+      1.55,
+      false,
+      signalPaint,
+    );
+
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: signalCenter,
+        radius: 27,
+      ),
+      -2.35,
+      1.55,
+      false,
+      signalPaint,
+    );
+
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: signalCenter,
+        radius: 37,
+      ),
+      -2.35,
+      1.55,
+      false,
+      signalPaint,
+    );
+
+    // Small foreground location marker.
+    final markerCenter = Offset(
+      size.width * 0.78,
+      size.height * 0.64,
+    );
+
+    final markerPaint = Paint()
+      ..color = const Color(0xFF27C2FF)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(
+      markerCenter,
+      7,
+      markerPaint,
+    );
+
+    final markerRingPaint = Paint()
+      ..color = const Color(0xFF27C2FF).withOpacity(0.30)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    canvas.drawCircle(
+      markerCenter,
+      14,
+      markerRingPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return false;
+  }
+}
+
 
 // ============================================================
 // MESSAGE MODEL
@@ -87,6 +597,77 @@ class ChatMessage {
 }
 
 // ============================================================
+// OFFLINE MBTILES MAP
+// ============================================================
+
+class OfflineMapManager {
+  static const String assetPath =
+      'assets/maps/noida.mbtiles';
+
+  static const String localFileName =
+      'noida.mbtiles';
+
+  static Future<MbTilesTileProvider> load() async {
+    final directory =
+    await getApplicationDocumentsDirectory();
+
+    final file = File(
+      '${directory.path}/$localFileName',
+    );
+
+    // ----------------------------------------------------------
+    // Copy the MBTiles asset to application storage.
+    //
+    // We only do this when the file does not already exist.
+    // This prevents copying ~28 MB every time the app starts.
+    // ----------------------------------------------------------
+
+    if (!await file.exists()) {
+      debugPrint(
+        'OFFLINE MAP: Copying MBTiles to device...',
+      );
+
+      final byteData =
+      await rootBundle.load(assetPath);
+
+      final bytes = byteData.buffer.asUint8List();
+
+      await file.writeAsBytes(
+        bytes,
+        flush: true,
+      );
+
+      debugPrint(
+        'OFFLINE MAP: Copy completed',
+      );
+    } else {
+      debugPrint(
+        'OFFLINE MAP: Existing MBTiles found',
+      );
+    }
+
+    debugPrint(
+      'OFFLINE MAP PATH: ${file.path}',
+    );
+
+    // ----------------------------------------------------------
+    // Open MBTiles database.
+    // ----------------------------------------------------------
+
+    final provider =
+    MbTilesTileProvider.fromPath(
+      path: file.path,
+    );
+
+    debugPrint(
+      'OFFLINE MAP: Provider initialized',
+    );
+
+    return provider;
+  }
+}
+
+// ============================================================
 // DEVICE PAGE
 // ============================================================
 
@@ -99,6 +680,11 @@ class DevicePage extends StatefulWidget {
 
 class _DevicePageState extends State<DevicePage> {
   final List<ScanResult> scanResults = [];
+
+  MbTilesTileProvider? offlineTileProvider;
+
+  bool mapLoading = true;
+  String? mapError;
 
   BluetoothDevice? connectedDevice;
 
@@ -117,6 +703,124 @@ class _DevicePageState extends State<DevicePage> {
 
   bool isScanning = false;
   bool isConnecting = false;
+  // ==========================================================
+// OFFLINE MAP WIDGET
+// ==========================================================
+
+  Widget _buildOfflineMap() {
+    // --------------------------------------------------------
+    // Loading
+    // --------------------------------------------------------
+
+    if (mapLoading) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+              ),
+            ),
+            SizedBox(height: 12),
+            Text(
+              'Loading offline map...',
+              style: TextStyle(
+                fontSize: 12,
+                color: Color(0xFF697487),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // --------------------------------------------------------
+    // Error
+    // --------------------------------------------------------
+
+    if (offlineTileProvider == null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.map_outlined,
+                size: 40,
+                color: Color(0xFF9AA3B2),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Offline map unavailable',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF303A4D),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                mapError ?? 'Unknown map error',
+                textAlign: TextAlign.center,
+                maxLines: 4,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: Color(0xFF8A94A4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // --------------------------------------------------------
+    // Offline map
+    // --------------------------------------------------------
+
+    return FlutterMap(
+      options: const MapOptions(
+        initialCenter: LatLng(
+          28.5970,
+          77.3595,
+        ),
+        initialZoom: 13,
+        minZoom: 10,
+        maxZoom: 17,
+      ),
+
+      children: [
+        TileLayer(
+          tileProvider: offlineTileProvider!,
+          tileSize: 256,
+        ),
+
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: const LatLng(
+                28.5970,
+                77.3595,
+              ),
+              width: 50,
+              height: 50,
+              child: const Icon(
+                Icons.location_on_rounded,
+                color: Color(0xFF1769E0),
+                size: 42,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   // ==========================================================
   // UUIDs
@@ -149,6 +853,53 @@ class _DevicePageState extends State<DevicePage> {
             });
           },
         );
+
+    _initializeOfflineMap();
+  }
+
+  // ==========================================================
+// INITIALIZE OFFLINE MAP
+// ==========================================================
+
+  Future<void> _initializeOfflineMap() async {
+    try {
+      debugPrint(
+        'OFFLINE MAP: Initializing...',
+      );
+
+      final provider =
+      await OfflineMapManager.load();
+
+      if (!mounted) {
+        provider.dispose();
+        return;
+      }
+
+      setState(() {
+        offlineTileProvider = provider;
+        mapLoading = false;
+        mapError = null;
+      });
+
+      debugPrint(
+        'OFFLINE MAP: READY',
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        'OFFLINE MAP ERROR: $e',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        mapLoading = false;
+        mapError = e.toString();
+      });
+    }
   }
 
   @override
@@ -156,6 +907,8 @@ class _DevicePageState extends State<DevicePage> {
     scanSubscription?.cancel();
     connectionSubscription?.cancel();
     notificationSubscription?.cancel();
+
+    offlineTileProvider?.dispose();
 
     super.dispose();
   }
@@ -636,83 +1389,25 @@ class _DevicePageState extends State<DevicePage> {
           // MAP
           // ====================================================
 
+          // ====================================================
+// MAP
+// ====================================================
+
           Padding(
             padding: const EdgeInsets.fromLTRB(
               16,
-              8,
+              4,
               16,
-              14,
+              10,
             ),
-            child: Container(
-              height: 190,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: const Color(0xFFE9EEF5),
-                borderRadius:
-                BorderRadius.circular(14),
-                border: Border.all(
-                  color: const Color(0xFFDDE3EB),
+            child: SizedBox(
+              height: 280,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Container(
+                  color: const Color(0xFFE9EDF2),
+                  child: _buildOfflineMap(),
                 ),
-              ),
-              child: Stack(
-                children: [
-                  const Center(
-                    child: Icon(
-                      Icons.map_outlined,
-                      size: 44,
-                      color: Color(0xFF8994A5),
-                    ),
-                  ),
-
-                  Positioned(
-                    left: 20,
-                    top: 20,
-                    child: _mapMarker(
-                      connected: connectedDevice !=
-                          null,
-                    ),
-                  ),
-
-                  Positioned(
-                    right: 55,
-                    bottom: 35,
-                    child: _mapMarker(
-                      connected: false,
-                    ),
-                  ),
-
-                  Positioned(
-                    left: 120,
-                    bottom: 50,
-                    child: _mapMarker(
-                      connected: false,
-                    ),
-                  ),
-
-                  Positioned(
-                    left: 14,
-                    bottom: 12,
-                    child: Container(
-                      padding:
-                      const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius:
-                        BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'Junction Map',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
               ),
             ),
           ),
