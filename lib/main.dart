@@ -26,21 +26,18 @@ class LoraTrackerApp extends StatelessWidget {
     return MaterialApp(
       title: 'LoRa Tracker',
       debugShowCheckedModeBanner: false,
-
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF1769E0),
         ),
         scaffoldBackgroundColor: const Color(0xFFF6F8FB),
-
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
           foregroundColor: Color(0xFF172033),
           elevation: 0,
           centerTitle: false,
         ),
-
         cardTheme: CardThemeData(
           elevation: 0,
           color: Colors.white,
@@ -49,7 +46,6 @@ class LoraTrackerApp extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
           ),
         ),
-
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: const Color(0xFFF1F4F8),
@@ -70,12 +66,10 @@ class LoraTrackerApp extends StatelessWidget {
           ),
         ),
       ),
-
       home: const SplashScreen(),
     );
   }
 }
-
 
 // ============================================================
 // SPLASH SCREEN
@@ -160,7 +154,6 @@ class _SplashScreenState extends State<SplashScreen>
         ),
         child: Stack(
           children: [
-            // Subtle radar/signal rings.
             Positioned(
               top: -70,
               right: -80,
@@ -169,7 +162,6 @@ class _SplashScreenState extends State<SplashScreen>
                 opacity: 0.10,
               ),
             ),
-
             Positioned(
               top: 115,
               left: -105,
@@ -178,8 +170,6 @@ class _SplashScreenState extends State<SplashScreen>
                 opacity: 0.07,
               ),
             ),
-
-            // Small stars / signal points.
             const Positioned(
               top: 92,
               left: 38,
@@ -200,13 +190,10 @@ class _SplashScreenState extends State<SplashScreen>
               right: 32,
               child: _SplashDot(size: 3),
             ),
-
             SafeArea(
               child: Column(
                 children: [
                   const Spacer(flex: 2),
-
-                  // Main LoRa signal / location icon.
                   ScaleTransition(
                     scale: _pulseAnimation,
                     child: Container(
@@ -216,14 +203,12 @@ class _SplashScreenState extends State<SplashScreen>
                         shape: BoxShape.circle,
                         color: const Color(0xFF0C365A),
                         border: Border.all(
-                          color: const Color(0xFF3EBBFF)
-                              .withOpacity(0.45),
+                          color: const Color(0xFF3EBBFF).withOpacity(0.45),
                           width: 1.2,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF19B9FF)
-                                .withOpacity(0.20),
+                            color: const Color(0xFF19B9FF).withOpacity(0.20),
                             blurRadius: 32,
                             spreadRadius: 4,
                           ),
@@ -238,8 +223,8 @@ class _SplashScreenState extends State<SplashScreen>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: const Color(0xFF29B6F6)
-                                    .withOpacity(0.24),
+                                color:
+                                const Color(0xFF29B6F6).withOpacity(0.24),
                               ),
                             ),
                           ),
@@ -260,10 +245,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 30),
-
-                  // Project title.
                   RichText(
                     text: const TextSpan(
                       style: TextStyle(
@@ -287,9 +269,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ],
                     ),
                   ),
-
                   const SizedBox(height: 9),
-
                   const Text(
                     'Track. Connect. Explore.',
                     style: TextStyle(
@@ -299,10 +279,7 @@ class _SplashScreenState extends State<SplashScreen>
                       letterSpacing: 1.2,
                     ),
                   ),
-
                   const Spacer(flex: 1),
-
-                  // Adventurous mountain / radio tower illustration.
                   SizedBox(
                     height: 175,
                     width: double.infinity,
@@ -310,10 +287,7 @@ class _SplashScreenState extends State<SplashScreen>
                       painter: _SplashLandscapePainter(),
                     ),
                   ),
-
                   const SizedBox(height: 4),
-
-                  // Loading indicator.
                   Column(
                     children: [
                       const SizedBox(
@@ -343,9 +317,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                     ],
                   ),
-
                   const Spacer(flex: 1),
-
                   const Padding(
                     padding: EdgeInsets.only(bottom: 24),
                     child: Text(
@@ -418,7 +390,6 @@ class _SplashLandscapePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final groundY = size.height * 0.78;
 
-    // Far mountain range.
     final farMountain = Paint()
       ..color = const Color(0xFF143B59)
       ..style = PaintingStyle.fill;
@@ -437,7 +408,6 @@ class _SplashLandscapePainter extends CustomPainter {
 
     canvas.drawPath(farPath, farMountain);
 
-    // Front mountain range.
     final frontMountain = Paint()
       ..color = const Color(0xFF09263E)
       ..style = PaintingStyle.fill;
@@ -456,7 +426,6 @@ class _SplashLandscapePainter extends CustomPainter {
 
     canvas.drawPath(frontPath, frontMountain);
 
-    // Radio tower.
     final towerPaint = Paint()
       ..color = const Color(0xFF6D9AB3)
       ..strokeWidth = 2
@@ -489,7 +458,6 @@ class _SplashLandscapePainter extends CustomPainter {
       );
     }
 
-    // Antenna.
     final antennaPaint = Paint()
       ..color = const Color(0xFF35C4FF)
       ..strokeWidth = 2.2
@@ -501,7 +469,6 @@ class _SplashLandscapePainter extends CustomPainter {
       antennaPaint,
     );
 
-    // Radio signal arcs.
     final signalPaint = Paint()
       ..color = const Color(0xFF35C4FF).withOpacity(0.75)
       ..style = PaintingStyle.stroke
@@ -545,7 +512,6 @@ class _SplashLandscapePainter extends CustomPainter {
       signalPaint,
     );
 
-    // Small foreground location marker.
     final markerCenter = Offset(
       size.width * 0.78,
       size.height * 0.64,
@@ -579,6 +545,119 @@ class _SplashLandscapePainter extends CustomPainter {
   }
 }
 
+// ============================================================
+// LOCATION PACKET MODEL
+// ============================================================
+
+class LocationPacket {
+  final String deviceId;
+  final double latitude;
+  final double longitude;
+  final String timestamp;
+  final int battery;
+
+  const LocationPacket({
+    required this.deviceId,
+    required this.latitude,
+    required this.longitude,
+    required this.timestamp,
+    required this.battery,
+  });
+
+  // ==========================================================
+  // PACKET FORMAT
+  //
+  // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
+  //
+  // Example:
+  //
+  // LOC,DEV001,28.5985,77.3618,12:35:42,87
+  // ==========================================================
+
+  static LocationPacket? parse(String data) {
+    try {
+      final parts = data.trim().split(',');
+
+      if (parts.length != 6) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: wrong field count',
+        );
+        return null;
+      }
+
+      if (parts[0].trim().toUpperCase() != 'LOC') {
+        return null;
+      }
+
+      final deviceId = parts[1].trim();
+
+      if (deviceId.isEmpty) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: empty device ID',
+        );
+        return null;
+      }
+
+      final latitude = double.tryParse(
+        parts[2].trim(),
+      );
+
+      final longitude = double.tryParse(
+        parts[3].trim(),
+      );
+
+      final timestamp = parts[4].trim();
+
+      final battery = int.tryParse(
+        parts[5].trim(),
+      );
+
+      if (latitude == null ||
+          longitude == null ||
+          battery == null) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: invalid data',
+        );
+        return null;
+      }
+
+      if (latitude < -90 || latitude > 90) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: invalid latitude',
+        );
+        return null;
+      }
+
+      if (longitude < -180 || longitude > 180) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: invalid longitude',
+        );
+        return null;
+      }
+
+      if (battery < 0 || battery > 100) {
+        debugPrint(
+          'LOCATION PACKET REJECTED: invalid battery',
+        );
+        return null;
+      }
+
+      return LocationPacket(
+        deviceId: deviceId,
+        latitude: latitude,
+        longitude: longitude,
+        timestamp: timestamp,
+        battery: battery,
+      );
+    } catch (e) {
+      debugPrint(
+        'LOCATION PACKET PARSE ERROR: $e',
+      );
+
+      return null;
+    }
+  }
+}
 
 // ============================================================
 // MESSAGE MODEL
@@ -615,13 +694,6 @@ class OfflineMapManager {
       '${directory.path}/$localFileName',
     );
 
-    // ----------------------------------------------------------
-    // Copy the MBTiles asset to application storage.
-    //
-    // We only do this when the file does not already exist.
-    // This prevents copying ~28 MB every time the app starts.
-    // ----------------------------------------------------------
-
     if (!await file.exists()) {
       debugPrint(
         'OFFLINE MAP: Copying MBTiles to device...',
@@ -630,7 +702,8 @@ class OfflineMapManager {
       final byteData =
       await rootBundle.load(assetPath);
 
-      final bytes = byteData.buffer.asUint8List();
+      final bytes =
+      byteData.buffer.asUint8List();
 
       await file.writeAsBytes(
         bytes,
@@ -649,10 +722,6 @@ class OfflineMapManager {
     debugPrint(
       'OFFLINE MAP PATH: ${file.path}',
     );
-
-    // ----------------------------------------------------------
-    // Open MBTiles database.
-    // ----------------------------------------------------------
 
     final provider =
     MbTilesTileProvider.fromPath(
@@ -681,6 +750,21 @@ class DevicePage extends StatefulWidget {
 class _DevicePageState extends State<DevicePage> {
   final List<ScanResult> scanResults = [];
 
+  // ==========================================================
+  // RECEIVED LOCATION DATABASE
+  //
+  // One entry per Device ID.
+  //
+  // Example:
+  //
+  // DEV001 -> latest DEV001 location
+  // DEV002 -> latest DEV002 location
+  //
+  // If DEV001 sends another packet, its existing marker moves.
+  // ==========================================================
+
+  final Map<String, LocationPacket> receivedLocations = {};
+
   MbTilesTileProvider? offlineTileProvider;
 
   bool mapLoading = true;
@@ -703,9 +787,539 @@ class _DevicePageState extends State<DevicePage> {
 
   bool isScanning = false;
   bool isConnecting = false;
+
   // ==========================================================
-// OFFLINE MAP WIDGET
-// ==========================================================
+  // UUIDs
+  // ==========================================================
+
+  final Guid serviceUuid = Guid(
+    '6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
+  );
+
+  final Guid rxUuid = Guid(
+    '6E400002-B5A3-F393-E0A9-E50E24DCCA9E',
+  );
+
+  final Guid txUuid = Guid(
+    '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
+  );
+
+  // ==========================================================
+  // INIT
+  // ==========================================================
+
+  @override
+  void initState() {
+    super.initState();
+
+    scanSubscription =
+        FlutterBluePlus.scanResults.listen(
+              (results) {
+            if (!mounted) return;
+
+            setState(() {
+              scanResults.clear();
+              scanResults.addAll(results);
+            });
+          },
+        );
+
+    _initializeOfflineMap();
+  }
+
+  // ==========================================================
+  // INITIALIZE OFFLINE MAP
+  // ==========================================================
+
+  Future<void> _initializeOfflineMap() async {
+    try {
+      debugPrint(
+        'OFFLINE MAP: Initializing...',
+      );
+
+      final provider =
+      await OfflineMapManager.load();
+
+      if (!mounted) {
+        provider.dispose();
+        return;
+      }
+
+      setState(() {
+        offlineTileProvider = provider;
+        mapLoading = false;
+        mapError = null;
+      });
+
+      debugPrint(
+        'OFFLINE MAP: READY',
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        'OFFLINE MAP ERROR: $e',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        mapLoading = false;
+        mapError = e.toString();
+      });
+    }
+  }
+
+  // ==========================================================
+  // DISPOSE
+  // ==========================================================
+
+  @override
+  void dispose() {
+    scanSubscription?.cancel();
+    connectionSubscription?.cancel();
+    notificationSubscription?.cancel();
+
+    offlineTileProvider?.dispose();
+
+    super.dispose();
+  }
+
+  // ==========================================================
+  // SCAN
+  // ==========================================================
+
+  Future<void> startScan() async {
+    if (isScanning) return;
+
+    setState(() {
+      scanResults.clear();
+      isScanning = true;
+      status = 'Scanning for devices...';
+    });
+
+    try {
+      final bluetoothState =
+      await FlutterBluePlus.adapterState.first;
+
+      if (bluetoothState != BluetoothAdapterState.on) {
+        if (!mounted) return;
+
+        setState(() {
+          status = 'Bluetooth is OFF';
+          isScanning = false;
+        });
+
+        return;
+      }
+
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 5),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        isScanning = false;
+
+        status = scanResults.isEmpty
+            ? 'No devices found'
+            : '${scanResults.length} device(s) found';
+      });
+    } catch (e) {
+      debugPrint(
+        'SCAN ERROR: $e',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        isScanning = false;
+        status = 'Scan failed';
+      });
+    }
+  }
+
+  // ==========================================================
+  // CONNECT
+  // ==========================================================
+
+  Future<void> connectToDevice(
+      BluetoothDevice device) async {
+    if (isConnecting) return;
+
+    if (connectedDevice != null) {
+      if (connectedDevice!.remoteId ==
+          device.remoteId) {
+        return;
+      }
+
+      await disconnectDevice();
+    }
+
+    setState(() {
+      isConnecting = true;
+      status = 'Connecting...';
+    });
+
+    try {
+      await device.connect(
+        timeout: const Duration(seconds: 10),
+        license: License.free,
+      );
+
+      connectedDevice = device;
+
+      debugPrint(
+        'CONNECTED: ${device.platformName}',
+      );
+
+      // --------------------------------------------------------
+      // Connection state listener
+      // --------------------------------------------------------
+
+      await connectionSubscription?.cancel();
+
+      connectionSubscription =
+          device.connectionState.listen(
+                (state) {
+              debugPrint(
+                'Connection state: $state',
+              );
+
+              if (!mounted) return;
+
+              if (state ==
+                  BluetoothConnectionState.connected) {
+                setState(() {
+                  status = 'Connected';
+                });
+              } else {
+                setState(() {
+                  status = 'Disconnected';
+                  connectedDevice = null;
+                  rxCharacteristic = null;
+                  txCharacteristic = null;
+                });
+              }
+            },
+          );
+
+      // --------------------------------------------------------
+      // Discover BLE services
+      // --------------------------------------------------------
+
+      await discoverServices(device);
+
+      if (rxCharacteristic == null ||
+          txCharacteristic == null) {
+        throw Exception(
+          'Required BLE characteristics not found',
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        isConnecting = false;
+        status = 'Connected';
+      });
+
+      // --------------------------------------------------------
+      // IMPORTANT:
+      //
+      // NO CHAT NAVIGATION HERE.
+      //
+      // User must press CHAT manually.
+      // --------------------------------------------------------
+
+    } catch (e, stackTrace) {
+      debugPrint(
+        'CONNECTION ERROR: $e',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      await cleanupBle();
+
+      try {
+        await device.disconnect();
+      } catch (_) {
+        // Device may already be disconnected.
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        isConnecting = false;
+        connectedDevice = null;
+        status = 'Connection failed';
+      });
+    }
+  }
+
+  // ==========================================================
+  // DISCOVER SERVICES
+  // ==========================================================
+
+  Future<void> discoverServices(
+      BluetoothDevice device) async {
+    debugPrint(
+      '========== SERVICE DISCOVERY ==========',
+    );
+
+    final services =
+    await device.discoverServices();
+
+    BluetoothCharacteristic? foundRx;
+    BluetoothCharacteristic? foundTx;
+
+    for (final service in services) {
+      debugPrint(
+        'SERVICE: ${service.uuid}',
+      );
+
+      if (service.uuid != serviceUuid) {
+        continue;
+      }
+
+      for (final characteristic
+      in service.characteristics) {
+        debugPrint(
+          'CHARACTERISTIC: ${characteristic.uuid}',
+        );
+
+        // ------------------------------------------------------
+        // PHONE -> ESP32
+        // ------------------------------------------------------
+
+        if (characteristic.uuid == rxUuid) {
+          foundRx = characteristic;
+
+          debugPrint(
+            'RX CHARACTERISTIC FOUND',
+          );
+        }
+
+        // ------------------------------------------------------
+        // ESP32 -> PHONE
+        // ------------------------------------------------------
+
+        if (characteristic.uuid == txUuid) {
+          foundTx = characteristic;
+
+          debugPrint(
+            'TX CHARACTERISTIC FOUND',
+          );
+        }
+      }
+    }
+
+    if (foundRx == null) {
+      throw Exception(
+        'RX characteristic not found',
+      );
+    }
+
+    if (foundTx == null) {
+      throw Exception(
+        'TX characteristic not found',
+      );
+    }
+
+    rxCharacteristic = foundRx;
+    txCharacteristic = foundTx;
+
+    // ========================================================
+    // LISTENER CREATED BEFORE NOTIFICATIONS ENABLED
+    // ========================================================
+
+    await notificationSubscription?.cancel();
+
+    notificationSubscription =
+        txCharacteristic!.onValueReceived.listen(
+          handleIncomingBleData,
+          onError: (error) {
+            debugPrint(
+              'BLE NOTIFICATION ERROR: $error',
+            );
+          },
+          cancelOnError: false,
+        );
+
+    // --------------------------------------------------------
+    // Enable notifications
+    // --------------------------------------------------------
+
+    await txCharacteristic!.setNotifyValue(true);
+
+    debugPrint(
+      'TX NOTIFICATIONS ENABLED',
+    );
+
+    debugPrint(
+      '========== SERVICE DISCOVERY END ==========',
+    );
+  }
+
+  // ==========================================================
+  // BLE RECEIVE
+  // ==========================================================
+
+  void handleIncomingBleData(
+      List<int> value) {
+    if (value.isEmpty) return;
+
+    final message = utf8.decode(
+      value,
+      allowMalformed: true,
+    ).trim();
+
+    if (message.isEmpty) return;
+
+    debugPrint(
+      '================================',
+    );
+
+    debugPrint(
+      'BLE DATA RECEIVED',
+    );
+
+    debugPrint(
+      'DATA: $message',
+    );
+
+    debugPrint(
+      '================================',
+    );
+
+    // ========================================================
+    // LOCATION PACKET
+    //
+    // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
+    // ========================================================
+
+    final packet =
+    LocationPacket.parse(message);
+
+    if (packet != null) {
+      debugPrint(
+        'LOCATION PACKET DETECTED',
+      );
+
+      debugPrint(
+        'Device ID : ${packet.deviceId}',
+      );
+
+      debugPrint(
+        'Latitude  : ${packet.latitude}',
+      );
+
+      debugPrint(
+        'Longitude : ${packet.longitude}',
+      );
+
+      debugPrint(
+        'Timestamp : ${packet.timestamp}',
+      );
+
+      debugPrint(
+        'Battery   : ${packet.battery}%',
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        receivedLocations[packet.deviceId] =
+            packet;
+      });
+
+      return;
+    }
+
+    // --------------------------------------------------------
+    // Normal text packet.
+    //
+    // Do not put it into the map.
+    // ChatPage handles normal messages when open.
+    // --------------------------------------------------------
+
+    debugPrint(
+      'NORMAL BLE MESSAGE',
+    );
+  }
+
+  // ==========================================================
+  // CLEAN BLE
+  // ==========================================================
+
+  Future<void> cleanupBle() async {
+    await notificationSubscription?.cancel();
+
+    notificationSubscription = null;
+
+    await connectionSubscription?.cancel();
+
+    connectionSubscription = null;
+
+    rxCharacteristic = null;
+    txCharacteristic = null;
+  }
+
+  // ==========================================================
+  // DISCONNECT
+  // ==========================================================
+
+  Future<void> disconnectDevice() async {
+    debugPrint(
+      'Disconnecting device...',
+    );
+
+    final device = connectedDevice;
+
+    await cleanupBle();
+
+    if (device != null) {
+      try {
+        await device.disconnect();
+      } catch (e) {
+        debugPrint(
+          'Disconnect error: $e',
+        );
+      }
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      connectedDevice = null;
+      status = 'Disconnected';
+      isConnecting = false;
+    });
+  }
+
+  // ==========================================================
+  // DEVICE NAME
+  // ==========================================================
+
+  String getDeviceName(
+      BluetoothDevice device) {
+    final name = device.platformName;
+
+    if (name.isNotEmpty) {
+      return name;
+    }
+
+    return 'ESP32 Device';
+  }
+
+  // ==========================================================
+  // OFFLINE MAP
+  // ==========================================================
 
   Widget _buildOfflineMap() {
     // --------------------------------------------------------
@@ -781,8 +1395,126 @@ class _DevicePageState extends State<DevicePage> {
     }
 
     // --------------------------------------------------------
-    // Offline map
+    // MARKERS
     // --------------------------------------------------------
+
+    final List<Marker> markers = [];
+
+    // ========================================================
+    // PHONE / TEST LOCATION
+    // ========================================================
+
+    markers.add(
+      Marker(
+        point: const LatLng(
+          28.5970,
+          77.3595,
+        ),
+        width: 70,
+        height: 65,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding:
+              const EdgeInsets.symmetric(
+                horizontal: 7,
+                vertical: 3,
+              ),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1769E0),
+                borderRadius:
+                BorderRadius.circular(6),
+                boxShadow: const [
+                  BoxShadow(
+                    blurRadius: 4,
+                    color: Colors.black26,
+                  ),
+                ],
+              ),
+              child: const Text(
+                'PHONE',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const Icon(
+              Icons.location_on_rounded,
+              color: Color(0xFF1769E0),
+              size: 38,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // ========================================================
+    // RECEIVED DEVICES
+    // ========================================================
+
+    for (final packet
+    in receivedLocations.values) {
+      markers.add(
+        Marker(
+          point: LatLng(
+            packet.latitude,
+            packet.longitude,
+          ),
+          width: 95,
+          height: 72,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                constraints:
+                const BoxConstraints(
+                  maxWidth: 90,
+                ),
+                padding:
+                const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1F2937),
+                  borderRadius:
+                  BorderRadius.circular(6),
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 4,
+                      color: Colors.black26,
+                    ),
+                  ],
+                ),
+                child: Text(
+                  packet.deviceId,
+                  maxLines: 1,
+                  overflow:
+                  TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const Icon(
+                Icons.location_on_rounded,
+                color: Color(0xFFD64545),
+                size: 38,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ========================================================
+    // MAP
+    // ========================================================
 
     return FlutterMap(
       options: const MapOptions(
@@ -792,501 +1524,18 @@ class _DevicePageState extends State<DevicePage> {
         ),
         initialZoom: 13,
         minZoom: 10,
-        maxZoom: 17,
+        maxZoom: 18,
       ),
-
       children: [
         TileLayer(
           tileProvider: offlineTileProvider!,
           tileSize: 256,
         ),
-
         MarkerLayer(
-          markers: [
-            Marker(
-              point: const LatLng(
-                28.5970,
-                77.3595,
-              ),
-              width: 50,
-              height: 50,
-              child: const Icon(
-                Icons.location_on_rounded,
-                color: Color(0xFF1769E0),
-                size: 42,
-              ),
-            ),
-          ],
+          markers: markers,
         ),
       ],
     );
-  }
-
-  // ==========================================================
-  // UUIDs
-  // ==========================================================
-
-  final Guid serviceUuid = Guid(
-    '6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  final Guid rxUuid = Guid(
-    '6E400002-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  final Guid txUuid = Guid(
-    '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  @override
-  void initState() {
-    super.initState();
-
-    scanSubscription =
-        FlutterBluePlus.scanResults.listen(
-              (results) {
-            if (!mounted) return;
-
-            setState(() {
-              scanResults.clear();
-              scanResults.addAll(results);
-            });
-          },
-        );
-
-    _initializeOfflineMap();
-  }
-
-  // ==========================================================
-// INITIALIZE OFFLINE MAP
-// ==========================================================
-
-  Future<void> _initializeOfflineMap() async {
-    try {
-      debugPrint(
-        'OFFLINE MAP: Initializing...',
-      );
-
-      final provider =
-      await OfflineMapManager.load();
-
-      if (!mounted) {
-        provider.dispose();
-        return;
-      }
-
-      setState(() {
-        offlineTileProvider = provider;
-        mapLoading = false;
-        mapError = null;
-      });
-
-      debugPrint(
-        'OFFLINE MAP: READY',
-      );
-    } catch (e, stackTrace) {
-      debugPrint(
-        'OFFLINE MAP ERROR: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        mapLoading = false;
-        mapError = e.toString();
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    scanSubscription?.cancel();
-    connectionSubscription?.cancel();
-    notificationSubscription?.cancel();
-
-    offlineTileProvider?.dispose();
-
-    super.dispose();
-  }
-
-  // ==========================================================
-  // SCAN
-  // ==========================================================
-
-  Future<void> startScan() async {
-    if (isScanning) return;
-
-    setState(() {
-      scanResults.clear();
-      isScanning = true;
-      status = 'Scanning for devices...';
-    });
-
-    try {
-      final bluetoothState =
-      await FlutterBluePlus.adapterState.first;
-
-      if (bluetoothState != BluetoothAdapterState.on) {
-        if (!mounted) return;
-
-        setState(() {
-          status = 'Bluetooth is OFF';
-          isScanning = false;
-        });
-
-        return;
-      }
-
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 5),
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        isScanning = false;
-
-        status = scanResults.isEmpty
-            ? 'No devices found'
-            : '${scanResults.length} device(s) found';
-      });
-    } catch (e) {
-      debugPrint('SCAN ERROR: $e');
-
-      if (!mounted) return;
-
-      setState(() {
-        isScanning = false;
-        status = 'Scan failed';
-      });
-    }
-  }
-
-  // ==========================================================
-  // CONNECT
-  // ==========================================================
-
-  Future<void> connectToDevice(
-      BluetoothDevice device,
-      ) async {
-    if (isConnecting) return;
-
-    if (connectedDevice != null) {
-      if (connectedDevice!.remoteId ==
-          device.remoteId) {
-        return;
-      }
-
-      await disconnectDevice();
-    }
-
-    setState(() {
-      isConnecting = true;
-      status = 'Connecting...';
-    });
-
-    try {
-      await device.connect(
-        timeout: const Duration(seconds: 10),
-        license: License.free,
-      );
-
-      connectedDevice = device;
-
-      debugPrint(
-        'CONNECTED: ${device.platformName}',
-      );
-
-      // --------------------------------------------------------
-      // IMPORTANT:
-      // Create connection listener after successful connection.
-      // --------------------------------------------------------
-
-      await connectionSubscription?.cancel();
-
-      connectionSubscription =
-          device.connectionState.listen(
-                (state) {
-              debugPrint(
-                'Connection state: $state',
-              );
-
-              if (!mounted) return;
-
-              if (state ==
-                  BluetoothConnectionState.connected) {
-                setState(() {
-                  status = 'Connected';
-                });
-              } else {
-                setState(() {
-                  status = 'Disconnected';
-                  connectedDevice = null;
-                  rxCharacteristic = null;
-                  txCharacteristic = null;
-                });
-              }
-            },
-          );
-
-      // --------------------------------------------------------
-      // Discover characteristics
-      // --------------------------------------------------------
-
-      await discoverServices(device);
-
-      if (rxCharacteristic == null ||
-          txCharacteristic == null) {
-        throw Exception(
-          'Required BLE characteristics not found',
-        );
-      }
-
-      if (!mounted) return;
-
-      setState(() {
-        isConnecting = false;
-        status = 'Connected';
-      });
-
-      // --------------------------------------------------------
-      // Open chat page
-      // --------------------------------------------------------
-
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ChatPage(
-            device: device,
-            rxCharacteristic: rxCharacteristic!,
-            onDisconnect: disconnectDevice,
-          ),
-        ),
-      );
-
-      // When returning from ChatPage
-      if (mounted &&
-          connectedDevice != null) {
-        setState(() {
-          status = 'Connected';
-        });
-      }
-    } catch (e, stackTrace) {
-      debugPrint('CONNECTION ERROR: $e');
-      debugPrint(stackTrace.toString());
-
-      await cleanupBle();
-
-      if (!mounted) return;
-
-      setState(() {
-        isConnecting = false;
-        connectedDevice = null;
-        status = 'Connection failed';
-      });
-    }
-  }
-
-  // ==========================================================
-  // DISCOVER SERVICES
-  // ==========================================================
-
-  Future<void> discoverServices(
-      BluetoothDevice device,
-      ) async {
-    debugPrint(
-      '========== SERVICE DISCOVERY ==========',
-    );
-
-    final services =
-    await device.discoverServices();
-
-    BluetoothCharacteristic? foundRx;
-    BluetoothCharacteristic? foundTx;
-
-    for (final service in services) {
-      debugPrint(
-        'SERVICE: ${service.uuid}',
-      );
-
-      if (service.uuid != serviceUuid) {
-        continue;
-      }
-
-      for (final characteristic
-      in service.characteristics) {
-        debugPrint(
-          'CHARACTERISTIC: ${characteristic.uuid}',
-        );
-
-        // ------------------------------------------------------
-        // PHONE -> ESP32
-        // ------------------------------------------------------
-
-        if (characteristic.uuid == rxUuid) {
-          foundRx = characteristic;
-
-          debugPrint(
-            'RX CHARACTERISTIC FOUND',
-          );
-        }
-
-        // ------------------------------------------------------
-        // ESP32 -> PHONE
-        // ------------------------------------------------------
-
-        if (characteristic.uuid == txUuid) {
-          foundTx = characteristic;
-
-          debugPrint(
-            'TX CHARACTERISTIC FOUND',
-          );
-        }
-      }
-    }
-
-    if (foundRx == null) {
-      throw Exception(
-        'RX characteristic not found',
-      );
-    }
-
-    if (foundTx == null) {
-      throw Exception(
-        'TX characteristic not found',
-      );
-    }
-
-    rxCharacteristic = foundRx;
-    txCharacteristic = foundTx;
-
-    // ========================================================
-    // CRITICAL FIX
-    //
-    // LISTENER IS CREATED BEFORE NOTIFICATIONS ARE ENABLED.
-    // ========================================================
-
-    await notificationSubscription?.cancel();
-
-    notificationSubscription =
-        txCharacteristic!.onValueReceived.listen(
-              (value) {
-            // ----------------------------------------------------
-            // DO NOT TOUCH THE TEXT FIELD HERE.
-            // DO NOT REQUIRE KEYBOARD FOCUS.
-            // ----------------------------------------------------
-
-            final message = utf8.decode(
-              value,
-              allowMalformed: true,
-            );
-
-            debugPrint(
-              '================================',
-            );
-
-            debugPrint(
-              'BLE NOTIFICATION RECEIVED',
-            );
-
-            debugPrint(
-              'DATA: $message',
-            );
-
-            debugPrint(
-              '================================',
-            );
-
-            // The ChatPage owns the actual message display.
-            //
-            // This listener remains active while connected.
-          },
-          onError: (error) {
-            debugPrint(
-              'BLE NOTIFICATION ERROR: $error',
-            );
-          },
-        );
-
-    // --------------------------------------------------------
-    // NOW enable notifications.
-    // --------------------------------------------------------
-
-    await txCharacteristic!.setNotifyValue(true);
-
-    debugPrint(
-      'TX NOTIFICATIONS ENABLED',
-    );
-
-    debugPrint(
-      '========== SERVICE DISCOVERY END ==========',
-    );
-  }
-
-  // ==========================================================
-  // CLEAN BLE
-  // ==========================================================
-
-  Future<void> cleanupBle() async {
-    await notificationSubscription?.cancel();
-    notificationSubscription = null;
-
-    await connectionSubscription?.cancel();
-    connectionSubscription = null;
-
-    rxCharacteristic = null;
-    txCharacteristic = null;
-  }
-
-  // ==========================================================
-  // DISCONNECT
-  // ==========================================================
-
-  Future<void> disconnectDevice() async {
-    debugPrint(
-      'Disconnecting device...',
-    );
-
-    final device = connectedDevice;
-
-    await cleanupBle();
-
-    if (device != null) {
-      try {
-        await device.disconnect();
-      } catch (e) {
-        debugPrint(
-          'Disconnect error: $e',
-        );
-      }
-    }
-
-    if (!mounted) return;
-
-    setState(() {
-      connectedDevice = null;
-      status = 'Disconnected';
-      isConnecting = false;
-    });
-  }
-
-  // ==========================================================
-  // DEVICE NAME
-  // ==========================================================
-
-  String getDeviceName(
-      BluetoothDevice device,
-      ) {
-    final name = device.platformName;
-
-    if (name.isNotEmpty) {
-      return name;
-    }
-
-    return 'ESP32 Device';
   }
 
   // ==========================================================
@@ -1304,7 +1553,6 @@ class _DevicePageState extends State<DevicePage> {
             fontWeight: FontWeight.w700,
           ),
         ),
-
         actions: [
           IconButton(
             tooltip: 'Scan',
@@ -1316,7 +1564,6 @@ class _DevicePageState extends State<DevicePage> {
           ),
         ],
       ),
-
       body: Column(
         children: [
           // ====================================================
@@ -1324,7 +1571,8 @@ class _DevicePageState extends State<DevicePage> {
           // ====================================================
 
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding:
+            const EdgeInsets.fromLTRB(
               16,
               12,
               16,
@@ -1332,7 +1580,8 @@ class _DevicePageState extends State<DevicePage> {
             ),
             child: Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(
+              padding:
+              const EdgeInsets.symmetric(
                 horizontal: 14,
                 vertical: 12,
               ),
@@ -1357,20 +1606,20 @@ class _DevicePageState extends State<DevicePage> {
                           : Colors.grey,
                     ),
                   ),
-
                   const SizedBox(width: 10),
-
                   Expanded(
                     child: Text(
                       status,
-                      style: const TextStyle(
+                      style:
+                      const TextStyle(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF303A4D),
+                        fontWeight:
+                        FontWeight.w600,
+                        color:
+                        Color(0xFF303A4D),
                       ),
                     ),
                   ),
-
                   if (isScanning)
                     const SizedBox(
                       width: 16,
@@ -1389,12 +1638,9 @@ class _DevicePageState extends State<DevicePage> {
           // MAP
           // ====================================================
 
-          // ====================================================
-// MAP
-// ====================================================
-
           Padding(
-            padding: const EdgeInsets.fromLTRB(
+            padding:
+            const EdgeInsets.fromLTRB(
               16,
               4,
               16,
@@ -1403,10 +1649,13 @@ class _DevicePageState extends State<DevicePage> {
             child: SizedBox(
               height: 280,
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
+                borderRadius:
+                BorderRadius.circular(14),
                 child: Container(
-                  color: const Color(0xFFE9EDF2),
-                  child: _buildOfflineMap(),
+                  color:
+                  const Color(0xFFE9EDF2),
+                  child:
+                  _buildOfflineMap(),
                 ),
               ),
             ),
@@ -1417,7 +1666,8 @@ class _DevicePageState extends State<DevicePage> {
           // ====================================================
 
           Padding(
-            padding: const EdgeInsets.symmetric(
+            padding:
+            const EdgeInsets.symmetric(
               horizontal: 16,
             ),
             child: Row(
@@ -1426,18 +1676,19 @@ class _DevicePageState extends State<DevicePage> {
                   'Nearby Devices',
                   style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF202A3A),
+                    fontWeight:
+                    FontWeight.w700,
+                    color:
+                    Color(0xFF202A3A),
                   ),
                 ),
-
                 const Spacer(),
-
                 Text(
                   '${scanResults.length} found',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF7B8493),
+                    color:
+                    Color(0xFF7B8493),
                   ),
                 ),
               ],
@@ -1460,22 +1711,20 @@ class _DevicePageState extends State<DevicePage> {
                   const Icon(
                     Icons.bluetooth_disabled,
                     size: 34,
-                    color: Color(0xFF9AA3B2),
+                    color:
+                    Color(0xFF9AA3B2),
                   ),
-
                   const SizedBox(height: 8),
-
                   const Text(
                     'No devices found',
-                    style: TextStyle(
+                    style:
+                    TextStyle(
                       fontSize: 14,
                       color:
                       Color(0xFF727C8D),
                     ),
                   ),
-
                   const SizedBox(height: 12),
-
                   OutlinedButton(
                     onPressed:
                     isScanning
@@ -1518,7 +1767,9 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                   child: _DeviceCard(
                     name:
-                    getDeviceName(device),
+                    getDeviceName(
+                      device,
+                    ),
                     id: device.remoteId
                         .toString(),
                     rssi: result.rssi,
@@ -1526,52 +1777,57 @@ class _DevicePageState extends State<DevicePage> {
                     isConnected,
                     connecting:
                     isConnecting,
+
+                    // ----------------------------
+                    // CONNECT
+                    // ----------------------------
+
                     onConnect: () {
                       connectToDevice(
                         device,
                       );
                     },
+
+                    // ----------------------------
+                    // DISCONNECT
+                    // ----------------------------
+
                     onDisconnect:
                     disconnectDevice,
+
+                    // ----------------------------
+                    // CHAT
+                    // ----------------------------
+
+                    onChat:
+                    isConnected &&
+                        rxCharacteristic !=
+                            null
+                        ? () {
+                      Navigator.of(
+                        context,
+                      ).push(
+                        MaterialPageRoute(
+                          builder:
+                              (_) =>
+                              ChatPage(
+                                device:
+                                device,
+                                rxCharacteristic:
+                                rxCharacteristic!,
+                                onDisconnect:
+                                disconnectDevice,
+                              ),
+                        ),
+                      );
+                    }
+                        : null,
                   ),
                 );
               },
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _mapMarker({
-    required bool connected,
-  }) {
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        color: connected
-            ? const Color(0xFF1769E0)
-            : Colors.white,
-        border: Border.all(
-          color: connected
-              ? const Color(0xFF1769E0)
-              : const Color(0xFFB8C1CE),
-        ),
-        boxShadow: const [
-          BoxShadow(
-            blurRadius: 5,
-            color: Colors.black12,
-          ),
-        ],
-      ),
-      child: Icon(
-        Icons.location_on,
-        size: 17,
-        color: connected
-            ? Colors.white
-            : const Color(0xFF687487),
       ),
     );
   }
@@ -1585,11 +1841,13 @@ class _DeviceCard extends StatelessWidget {
   final String name;
   final String id;
   final int rssi;
+
   final bool connected;
   final bool connecting;
 
   final VoidCallback onConnect;
   final VoidCallback onDisconnect;
+  final VoidCallback? onChat;
 
   const _DeviceCard({
     required this.name,
@@ -1599,6 +1857,7 @@ class _DeviceCard extends StatelessWidget {
     required this.connecting,
     required this.onConnect,
     required this.onDisconnect,
+    this.onChat,
   });
 
   @override
@@ -1622,14 +1881,16 @@ class _DeviceCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: const Color(0xFFEFF4FC),
+              color:
+              const Color(0xFFEFF4FC),
               borderRadius:
               BorderRadius.circular(10),
             ),
             child: const Icon(
               Icons.developer_board_outlined,
               size: 22,
-              color: Color(0xFF1769E0),
+              color:
+              Color(0xFF1769E0),
             ),
           ),
 
@@ -1645,10 +1906,13 @@ class _DeviceCard extends StatelessWidget {
                   maxLines: 1,
                   overflow:
                   TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:
+                  const TextStyle(
                     fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF202A3A),
+                    fontWeight:
+                    FontWeight.w700,
+                    color:
+                    Color(0xFF202A3A),
                   ),
                 ),
 
@@ -1659,9 +1923,11 @@ class _DeviceCard extends StatelessWidget {
                   maxLines: 1,
                   overflow:
                   TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style:
+                  const TextStyle(
                     fontSize: 10,
-                    color: Color(0xFF8A94A4),
+                    color:
+                    Color(0xFF8A94A4),
                   ),
                 ),
 
@@ -1669,9 +1935,11 @@ class _DeviceCard extends StatelessWidget {
 
                 Text(
                   'RSSI $rssi dBm',
-                  style: const TextStyle(
+                  style:
+                  const TextStyle(
                     fontSize: 10,
-                    color: Color(0xFF727C8D),
+                    color:
+                    Color(0xFF727C8D),
                   ),
                 ),
               ],
@@ -1680,61 +1948,159 @@ class _DeviceCard extends StatelessWidget {
 
           const SizedBox(width: 8),
 
+          // ==================================================
+          // CONNECTED
+          // ==================================================
+
           if (connected)
-            SizedBox(
-              height: 34,
-              child: ElevatedButton(
-                onPressed: onDisconnect,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                  const Color(0xFFFCECEC),
-                  foregroundColor:
-                  const Color(0xFFD64545),
-                  elevation: 0,
-                  padding:
-                  const EdgeInsets.symmetric(
-                    horizontal: 12,
-                  ),
-                  shape:
-                  RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(8),
+            Row(
+              mainAxisSize:
+              MainAxisSize.min,
+              children: [
+                // --------------------------------------------
+                // CHAT
+                // --------------------------------------------
+
+                SizedBox(
+                  height: 34,
+                  child:
+                  OutlinedButton.icon(
+                    onPressed: onChat,
+                    icon: const Icon(
+                      Icons
+                          .chat_bubble_outline_rounded,
+                      size: 15,
+                    ),
+                    label: const Text(
+                      'CHAT',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight:
+                        FontWeight.w700,
+                      ),
+                    ),
+                    style:
+                    OutlinedButton
+                        .styleFrom(
+                      foregroundColor:
+                      const Color(
+                        0xFF1769E0,
+                      ),
+                      side:
+                      const BorderSide(
+                        color:
+                        Color(
+                          0xFF1769E0,
+                        ),
+                      ),
+                      padding:
+                      const EdgeInsets
+                          .symmetric(
+                        horizontal: 9,
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius
+                            .circular(
+                          8,
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-                child: const Text(
-                  'DISCONNECT',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+
+                const SizedBox(width: 6),
+
+                // --------------------------------------------
+                // DISCONNECT
+                // --------------------------------------------
+
+                SizedBox(
+                  height: 34,
+                  child:
+                  ElevatedButton(
+                    onPressed:
+                    onDisconnect,
+                    style:
+                    ElevatedButton
+                        .styleFrom(
+                      backgroundColor:
+                      const Color(
+                        0xFFFCECEC,
+                      ),
+                      foregroundColor:
+                      const Color(
+                        0xFFD64545,
+                      ),
+                      elevation: 0,
+                      padding:
+                      const EdgeInsets
+                          .symmetric(
+                        horizontal: 9,
+                      ),
+                      shape:
+                      RoundedRectangleBorder(
+                        borderRadius:
+                        BorderRadius
+                            .circular(
+                          8,
+                        ),
+                      ),
+                    ),
+                    child:
+                    const Text(
+                      'DISCONNECT',
+                      style:
+                      TextStyle(
+                        fontSize: 10,
+                        fontWeight:
+                        FontWeight.w700,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             )
+
+          // ==================================================
+          // NOT CONNECTED
+          // ==================================================
+
           else
             SizedBox(
               height: 34,
               child: ElevatedButton(
                 onPressed:
-                connecting ? null : onConnect,
-                style: ElevatedButton.styleFrom(
+                connecting
+                    ? null
+                    : onConnect,
+                style:
+                ElevatedButton
+                    .styleFrom(
                   elevation: 0,
                   padding:
-                  const EdgeInsets.symmetric(
+                  const EdgeInsets
+                      .symmetric(
                     horizontal: 13,
                   ),
                   shape:
                   RoundedRectangleBorder(
                     borderRadius:
-                    BorderRadius.circular(8),
+                    BorderRadius.circular(
+                      8,
+                    ),
                   ),
                 ),
                 child: Text(
                   connecting
                       ? '...'
                       : 'CONNECT',
-                  style: const TextStyle(
+                  style:
+                  const TextStyle(
                     fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    fontWeight:
+                    FontWeight.w700,
                   ),
                 ),
               ),
@@ -1752,7 +2118,8 @@ class _DeviceCard extends StatelessWidget {
 class ChatPage extends StatefulWidget {
   final BluetoothDevice device;
 
-  final BluetoothCharacteristic rxCharacteristic;
+  final BluetoothCharacteristic
+  rxCharacteristic;
 
   final Future<void> Function()
   onDisconnect;
@@ -1765,10 +2132,12 @@ class ChatPage extends StatefulWidget {
   });
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  State<ChatPage> createState() =>
+      _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState
+    extends State<ChatPage> {
   final TextEditingController
   messageController =
   TextEditingController();
@@ -1779,7 +2148,8 @@ class _ChatPageState extends State<ChatPage> {
 
   final List<ChatMessage> messages = [];
 
-  BluetoothCharacteristic? txCharacteristic;
+  BluetoothCharacteristic?
+  txCharacteristic;
 
   StreamSubscription<List<int>>?
   notificationSubscription;
@@ -1787,13 +2157,13 @@ class _ChatPageState extends State<ChatPage> {
   bool isConnected = true;
   bool isSending = false;
 
-  // ==========================================================
-  // UUID
-  // ==========================================================
-
   final Guid txUuid = Guid(
     '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
   );
+
+  // ==========================================================
+  // INIT
+  // ==========================================================
 
   @override
   void initState() {
@@ -1813,11 +2183,14 @@ class _ChatPageState extends State<ChatPage> {
       );
 
       final services =
-      await widget.device.discoverServices();
+      await widget.device
+          .discoverServices();
 
-      for (final service in services) {
+      for (final service
+      in services) {
         for (final characteristic
-        in service.characteristics) {
+        in service
+            .characteristics) {
           if (characteristic.uuid ==
               txUuid) {
             txCharacteristic =
@@ -1835,16 +2208,6 @@ class _ChatPageState extends State<ChatPage> {
 
         return;
       }
-
-      // ======================================================
-      // CRITICAL ORDER
-      //
-      // 1. Cancel old listener
-      // 2. Create listener
-      // 3. Enable notification
-      //
-      // NOT the other way around.
-      // ======================================================
 
       await notificationSubscription
           ?.cancel();
@@ -1888,8 +2251,7 @@ class _ChatPageState extends State<ChatPage> {
   // ==========================================================
 
   void handleIncomingBleData(
-      List<int> value,
-      ) {
+      List<int> value) {
     if (value.isEmpty) return;
 
     final message = utf8.decode(
@@ -1904,26 +2266,41 @@ class _ChatPageState extends State<ChatPage> {
     );
 
     debugPrint(
-      'MESSAGE FROM ESP32',
+      'CHAT BLE DATA RECEIVED',
     );
 
-    debugPrint(message);
+    debugPrint(
+      'DATA: $message',
+    );
 
     debugPrint(
       '================================',
     );
 
-    if (!mounted) return;
-
-    // ========================================================
-    // UI UPDATE HAPPENS DIRECTLY HERE.
+    // --------------------------------------------------------
+    // Ignore location packets here.
     //
-    // It does NOT depend on:
-    // - TextField
-    // - keyboard
-    // - cursor
-    // - messageController
-    // ========================================================
+    // DevicePage handles location packets.
+    // --------------------------------------------------------
+
+    final locationPacket =
+    LocationPacket.parse(
+      message,
+    );
+
+    if (locationPacket != null) {
+      debugPrint(
+        'CHAT: Location packet ignored here.',
+      );
+
+      return;
+    }
+
+    // --------------------------------------------------------
+    // Normal chat message
+    // --------------------------------------------------------
+
+    if (!mounted) return;
 
     setState(() {
       messages.add(
@@ -1943,34 +2320,39 @@ class _ChatPageState extends State<ChatPage> {
   // ==========================================================
 
   Future<void> sendChatMessage(
-      String message,
-      ) async {
+      String message) async {
     message = message.trim();
 
     if (message.isEmpty) return;
 
-    if (!isConnected) {
-      return;
-    }
+    if (!isConnected) return;
 
-    if (isSending) {
-      return;
-    }
+    if (isSending) return;
 
     setState(() {
       isSending = true;
     });
 
     try {
-      await widget.rxCharacteristic.write(
+      await widget.rxCharacteristic
+          .write(
         utf8.encode(message),
         withoutResponse: false,
       );
 
-      debugPrint('================================');
-      debugPrint('MESSAGE SENT TO ESP32');
+      debugPrint(
+        '================================',
+      );
+
+      debugPrint(
+        'MESSAGE SENT TO ESP32',
+      );
+
       debugPrint(message);
-      debugPrint('================================');
+
+      debugPrint(
+        '================================',
+      );
 
       if (!mounted) return;
 
@@ -1984,12 +2366,15 @@ class _ChatPageState extends State<ChatPage> {
         );
 
         messageController.clear();
+
         isSending = false;
       });
 
       scrollChatToBottom();
     } catch (e) {
-      debugPrint('SEND ERROR: $e');
+      debugPrint(
+        'SEND ERROR: $e',
+      );
 
       if (!mounted) return;
 
@@ -1997,9 +2382,13 @@ class _ChatPageState extends State<ChatPage> {
         isSending = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(
         const SnackBar(
-          content: Text('Failed to send message'),
+          content: Text(
+            'Failed to send message',
+          ),
         ),
       );
     }
@@ -2009,7 +2398,8 @@ class _ChatPageState extends State<ChatPage> {
   // DISCONNECT
   // ==========================================================
 
-  Future<void> disconnectFromChat() async {
+  Future<void>
+  disconnectFromChat() async {
     await notificationSubscription
         ?.cancel();
 
@@ -2038,28 +2428,34 @@ class _ChatPageState extends State<ChatPage> {
 
   void scrollChatToBottom() {
     WidgetsBinding.instance
-        .addPostFrameCallback((_) {
-      if (!chatScrollController
-          .hasClients) {
-        return;
-      }
+        .addPostFrameCallback(
+          (_) {
+        if (!chatScrollController
+            .hasClients) {
+          return;
+        }
 
-      chatScrollController.animateTo(
         chatScrollController
-            .position
-            .maxScrollExtent,
-        duration:
-        const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    });
+            .animateTo(
+          chatScrollController
+              .position
+              .maxScrollExtent,
+          duration:
+          const Duration(
+            milliseconds: 220,
+          ),
+          curve: Curves.easeOut,
+        );
+      },
+    );
   }
 
   // ==========================================================
   // TIME
   // ==========================================================
 
-  String formatTime(DateTime time) {
+  String formatTime(
+      DateTime time) {
     final hour = time.hour
         .toString()
         .padLeft(2, '0');
@@ -2077,11 +2473,13 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
-    notificationSubscription?.cancel();
+    notificationSubscription
+        ?.cancel();
 
     messageController.dispose();
 
-    chatScrollController.dispose();
+    chatScrollController
+        .dispose();
 
     super.dispose();
   }
@@ -2100,7 +2498,8 @@ class _ChatPageState extends State<ChatPage> {
             Icons.arrow_back_rounded,
           ),
           onPressed: () {
-            Navigator.of(context).pop();
+            Navigator.of(context)
+                .pop();
           },
         ),
 
@@ -2113,15 +2512,22 @@ class _ChatPageState extends State<ChatPage> {
               height: 36,
               decoration: BoxDecoration(
                 color:
-                const Color(0xFFEFF4FC),
+                const Color(
+                  0xFFEFF4FC,
+                ),
                 borderRadius:
-                BorderRadius.circular(10),
+                BorderRadius
+                    .circular(
+                  10,
+                ),
               ),
               child: const Icon(
                 Icons.developer_board,
                 size: 19,
                 color:
-                Color(0xFF1769E0),
+                Color(
+                  0xFF1769E0,
+                ),
               ),
             ),
 
@@ -2130,7 +2536,8 @@ class _ChatPageState extends State<ChatPage> {
             Expanded(
               child: Column(
                 crossAxisAlignment:
-                CrossAxisAlignment.start,
+                CrossAxisAlignment
+                    .start,
                 children: [
                   Text(
                     widget.device
@@ -2141,8 +2548,10 @@ class _ChatPageState extends State<ChatPage> {
                         : 'ESP32 Device',
                     maxLines: 1,
                     overflow:
-                    TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    TextOverflow
+                        .ellipsis,
+                    style:
+                    const TextStyle(
                       fontSize: 15,
                       fontWeight:
                       FontWeight.w700,
@@ -2157,7 +2566,8 @@ class _ChatPageState extends State<ChatPage> {
                         decoration:
                         const BoxDecoration(
                           shape:
-                          BoxShape.circle,
+                          BoxShape
+                              .circle,
                           color:
                           Colors.green,
                         ),
@@ -2169,10 +2579,13 @@ class _ChatPageState extends State<ChatPage> {
 
                       const Text(
                         'Connected',
-                        style: TextStyle(
+                        style:
+                        TextStyle(
                           fontSize: 10,
                           color:
-                          Color(0xFF6D7787),
+                          Color(
+                            0xFF6D7787,
+                          ),
                         ),
                       ),
                     ],
@@ -2193,7 +2606,8 @@ class _ChatPageState extends State<ChatPage> {
           Container(
             width: double.infinity,
             padding:
-            const EdgeInsets.symmetric(
+            const EdgeInsets
+                .symmetric(
               horizontal: 16,
               vertical: 9,
             ),
@@ -2201,18 +2615,26 @@ class _ChatPageState extends State<ChatPage> {
             const BoxDecoration(
               color: Colors.white,
               border: Border(
-                bottom: BorderSide(
-                  color: Color(0xFFE8ECF1),
+                bottom:
+                BorderSide(
+                  color:
+                  Color(
+                    0xFFE8ECF1,
+                  ),
                 ),
               ),
             ),
             child: Text(
-              widget.device.remoteId
+              widget.device
+                  .remoteId
                   .toString(),
-              style: const TextStyle(
+              style:
+              const TextStyle(
                 fontSize: 10,
                 color:
-                Color(0xFF8993A2),
+                Color(
+                  0xFF8993A2,
+                ),
               ),
             ),
           ),
@@ -2226,7 +2648,8 @@ class _ChatPageState extends State<ChatPage> {
                 ? Center(
               child: Column(
                 mainAxisSize:
-                MainAxisSize.min,
+                MainAxisSize
+                    .min,
                 children: [
                   Container(
                     width: 58,
@@ -2243,8 +2666,10 @@ class _ChatPageState extends State<ChatPage> {
                         18,
                       ),
                     ),
-                    child: const Icon(
-                      Icons.chat_bubble_outline,
+                    child:
+                    const Icon(
+                      Icons
+                          .chat_bubble_outline,
                       size: 28,
                       color:
                       Color(
@@ -2259,10 +2684,12 @@ class _ChatPageState extends State<ChatPage> {
 
                   const Text(
                     'No messages yet',
-                    style: TextStyle(
+                    style:
+                    TextStyle(
                       fontSize: 14,
                       fontWeight:
-                      FontWeight.w600,
+                      FontWeight
+                          .w600,
                       color:
                       Color(
                         0xFF697487,
@@ -2276,7 +2703,8 @@ class _ChatPageState extends State<ChatPage> {
 
                   const Text(
                     'Send a message to the ESP32',
-                    style: TextStyle(
+                    style:
+                    TextStyle(
                       fontSize: 11,
                       color:
                       Color(
@@ -2306,8 +2734,10 @@ class _ChatPageState extends State<ChatPage> {
                 messages[index];
 
                 return _ChatBubble(
-                  message: message,
-                  time: formatTime(
+                  message:
+                  message,
+                  time:
+                  formatTime(
                     message.time,
                   ),
                 );
@@ -2322,7 +2752,8 @@ class _ChatPageState extends State<ChatPage> {
           SafeArea(
             child: Container(
               padding:
-              const EdgeInsets.fromLTRB(
+              const EdgeInsets
+                  .fromLTRB(
                 10,
                 8,
                 10,
@@ -2333,13 +2764,17 @@ class _ChatPageState extends State<ChatPage> {
                 color: Colors.white,
                 border: Border(
                   top: BorderSide(
-                    color: Color(0xFFE8ECF1),
+                    color:
+                    Color(
+                      0xFFE8ECF1,
+                    ),
                   ),
                 ),
               ),
               child: Row(
                 crossAxisAlignment:
-                CrossAxisAlignment.end,
+                CrossAxisAlignment
+                    .end,
                 children: [
                   Expanded(
                     child: TextField(
@@ -2351,12 +2786,14 @@ class _ChatPageState extends State<ChatPage> {
                       minLines: 1,
                       maxLines: 4,
                       textInputAction:
-                      TextInputAction.newline,
+                      TextInputAction
+                          .newline,
                       decoration:
                       const InputDecoration(
                         hintText:
                         'Type a message...',
-                        hintStyle: TextStyle(
+                        hintStyle:
+                        TextStyle(
                           fontSize: 13,
                           color:
                           Color(
@@ -2370,7 +2807,8 @@ class _ChatPageState extends State<ChatPage> {
                           vertical: 11,
                         ),
                       ),
-                      onSubmitted: (value) {
+                      onSubmitted:
+                          (value) {
                         sendChatMessage(
                           value,
                         );
@@ -2378,12 +2816,15 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                   ),
 
-                  const SizedBox(width: 7),
+                  const SizedBox(
+                    width: 7,
+                  ),
 
                   SizedBox(
                     width: 45,
                     height: 45,
-                    child: FilledButton(
+                    child:
+                    FilledButton(
                       onPressed:
                       isConnected &&
                           !isSending
@@ -2395,7 +2836,8 @@ class _ChatPageState extends State<ChatPage> {
                       }
                           : null,
                       style:
-                      FilledButton.styleFrom(
+                      FilledButton
+                          .styleFrom(
                         padding:
                         EdgeInsets.zero,
                         shape:
@@ -2413,13 +2855,16 @@ class _ChatPageState extends State<ChatPage> {
                         height: 18,
                         child:
                         CircularProgressIndicator(
-                          strokeWidth: 2,
+                          strokeWidth:
+                          2,
                           color:
-                          Colors.white,
+                          Colors
+                              .white,
                         ),
                       )
                           : const Icon(
-                        Icons.send_rounded,
+                        Icons
+                            .send_rounded,
                         size: 20,
                       ),
                     ),
@@ -2438,7 +2883,8 @@ class _ChatPageState extends State<ChatPage> {
 // CHAT BUBBLE
 // ============================================================
 
-class _ChatBubble extends StatelessWidget {
+class _ChatBubble
+    extends StatelessWidget {
   final ChatMessage message;
   final String time;
 
@@ -2450,11 +2896,13 @@ class _ChatBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Align(
-      alignment: message.fromMe
+      alignment:
+      message.fromMe
           ? Alignment.centerRight
           : Alignment.centerLeft,
       child: Container(
-        constraints: BoxConstraints(
+        constraints:
+        BoxConstraints(
           maxWidth:
           MediaQuery.of(context)
               .size
@@ -2472,12 +2920,17 @@ class _ChatBubble extends StatelessWidget {
           10,
           7,
         ),
-        decoration: BoxDecoration(
+        decoration:
+        BoxDecoration(
           color: message.fromMe
-              ? const Color(0xFF1769E0)
+              ? const Color(
+            0xFF1769E0,
+          )
               : Colors.white,
           borderRadius:
-          BorderRadius.circular(14),
+          BorderRadius.circular(
+            14,
+          ),
           border: message.fromMe
               ? null
               : Border.all(
@@ -2489,7 +2942,8 @@ class _ChatBubble extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment:
-          CrossAxisAlignment.end,
+          CrossAxisAlignment
+              .end,
           children: [
             Align(
               alignment:
@@ -2508,7 +2962,9 @@ class _ChatBubble extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 3),
+            const SizedBox(
+              height: 3,
+            ),
 
             Text(
               time,
