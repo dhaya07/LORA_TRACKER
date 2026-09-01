@@ -36,7 +36,8 @@ dependencies:
   flutter_map_mbtiles: ^1.0.4
   latlong2: ^0.9.1
   path_provider: ^2.1.5
-  geolocator:
+  geolocator: ^14.0.2
+  battery_plus: ^6.2.3
 
   #shared_preferences:
   #sqflite:

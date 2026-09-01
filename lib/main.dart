@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +10,13 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:path_provider/path_provider.dart';
+
+// ============================================================
+// NEW: LOCATION + BATTERY
+// ============================================================
+
+import 'package:geolocator/geolocator.dart';
+import 'package:battery_plus/battery_plus.dart';
 
 void main() {
   runApp(const LoraTrackerApp());
@@ -299,8 +307,7 @@ class _SplashScreenState extends State<SplashScreen>
                           child: LinearProgressIndicator(
                             minHeight: 4,
                             backgroundColor: Color(0xFF21415B),
-                            valueColor:
-                            AlwaysStoppedAnimation<Color>(
+                            valueColor: AlwaysStoppedAnimation<Color>(
                               Color(0xFF27C2FF),
                             ),
                           ),
@@ -571,7 +578,7 @@ class LocationPacket {
   //
   // Example:
   //
-  // LOC,DEV001,28.5985,77.3618,12:35:42,87
+  // LOC,PHONE_A7F3,28.5985,77.3618,12:35:42,87
   // ==========================================================
 
   static LocationPacket? parse(String data) {
@@ -754,13 +761,6 @@ class _DevicePageState extends State<DevicePage> {
   // RECEIVED LOCATION DATABASE
   //
   // One entry per Device ID.
-  //
-  // Example:
-  //
-  // DEV001 -> latest DEV001 location
-  // DEV002 -> latest DEV002 location
-  //
-  // If DEV001 sends another packet, its existing marker moves.
   // ==========================================================
 
   final Map<String, LocationPacket> receivedLocations = {};
@@ -805,6 +805,20 @@ class _DevicePageState extends State<DevicePage> {
   );
 
   // ==========================================================
+  // NEW: MOBILE LOCATION SHARING
+  // ==========================================================
+
+  Timer? locationTimer;
+
+  final Battery battery = Battery();
+
+  bool locationSending = false;
+
+  String mobileDeviceId = 'PHONE';
+
+  bool locationPermissionReady = false;
+
+  // ==========================================================
   // INIT
   // ==========================================================
 
@@ -825,6 +839,80 @@ class _DevicePageState extends State<DevicePage> {
         );
 
     _initializeOfflineMap();
+
+    // NEW:
+    // Create/load a persistent phone ID.
+    _initializeMobileDeviceId();
+  }
+
+  // ==========================================================
+  // NEW: INITIALIZE MOBILE DEVICE ID
+  // ==========================================================
+
+  Future<void> _initializeMobileDeviceId() async {
+    try {
+      final directory =
+      await getApplicationDocumentsDirectory();
+
+      final file = File(
+        '${directory.path}/lora_tracker_device_id.txt',
+      );
+
+      if (await file.exists()) {
+        final existingId =
+        (await file.readAsString()).trim();
+
+        if (existingId.isNotEmpty) {
+          if (!mounted) return;
+
+          setState(() {
+            mobileDeviceId = existingId;
+          });
+
+          debugPrint(
+            'MOBILE DEVICE ID: $mobileDeviceId',
+          );
+
+          return;
+        }
+      }
+
+      final random = Random.secure();
+
+      final part1 =
+      random.nextInt(0xFFFF)
+          .toRadixString(16)
+          .padLeft(4, '0')
+          .toUpperCase();
+
+      final part2 =
+      random.nextInt(0xFFFF)
+          .toRadixString(16)
+          .padLeft(4, '0')
+          .toUpperCase();
+
+      final generatedId =
+          'PHONE_$part1$part2';
+
+      await file.writeAsString(
+        generatedId,
+        flush: true,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        mobileDeviceId = generatedId;
+      });
+
+      debugPrint(
+        'MOBILE DEVICE ID CREATED: $mobileDeviceId',
+      );
+    } catch (e) {
+      debugPrint(
+        'MOBILE DEVICE ID ERROR: $e',
+      );
+    }
   }
 
   // ==========================================================
@@ -878,6 +966,9 @@ class _DevicePageState extends State<DevicePage> {
 
   @override
   void dispose() {
+    // NEW
+    locationTimer?.cancel();
+
     scanSubscription?.cancel();
     connectionSubscription?.cancel();
     notificationSubscription?.cancel();
@@ -997,6 +1088,9 @@ class _DevicePageState extends State<DevicePage> {
                   status = 'Connected';
                 });
               } else {
+                // NEW
+                _stopLocationSharing();
+
                 setState(() {
                   status = 'Disconnected';
                   connectedDevice = null;
@@ -1026,6 +1120,13 @@ class _DevicePageState extends State<DevicePage> {
         isConnecting = false;
         status = 'Connected';
       });
+
+      // ========================================================
+      // NEW:
+      // START MOBILE LOCATION SHARING
+      // ========================================================
+
+      await _startLocationSharing();
 
       // --------------------------------------------------------
       // IMPORTANT:
@@ -1254,6 +1355,278 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   // ==========================================================
+  // NEW: START LOCATION SHARING
+  // ==========================================================
+
+  Future<void> _startLocationSharing() async {
+    if (rxCharacteristic == null) {
+      debugPrint(
+        'LOCATION: RX characteristic unavailable',
+      );
+      return;
+    }
+
+    debugPrint(
+      'LOCATION: Preparing location permission...',
+    );
+
+    final permissionReady =
+    await _prepareLocationPermission();
+
+    if (!permissionReady) {
+      debugPrint(
+        'LOCATION: Permission/service not ready',
+      );
+
+      return;
+    }
+
+    locationPermissionReady = true;
+
+    // Cancel any old timer.
+    locationTimer?.cancel();
+
+    // --------------------------------------------------------
+    // SEND ONE LOCATION IMMEDIATELY
+    // --------------------------------------------------------
+
+    await _sendCurrentLocation();
+
+    // --------------------------------------------------------
+    // THEN SEND EVERY 30 SECONDS
+    // --------------------------------------------------------
+
+    locationTimer = Timer.periodic(
+      const Duration(seconds: 30),
+          (_) async {
+        await _sendCurrentLocation();
+      },
+    );
+
+    debugPrint(
+      'LOCATION: Periodic sharing started - every 30 seconds',
+    );
+  }
+
+  // ==========================================================
+  // NEW: STOP LOCATION SHARING
+  // ==========================================================
+
+  void _stopLocationSharing() {
+    locationTimer?.cancel();
+    locationTimer = null;
+
+    locationSending = false;
+
+    debugPrint(
+      'LOCATION: Periodic sharing stopped',
+    );
+  }
+
+  // ==========================================================
+  // NEW: LOCATION PERMISSION
+  // ==========================================================
+
+  Future<bool> _prepareLocationPermission() async {
+    try {
+      final serviceEnabled =
+      await Geolocator.isLocationServiceEnabled();
+
+      if (!serviceEnabled) {
+        debugPrint(
+          'LOCATION: Location service is OFF',
+        );
+
+        return false;
+      }
+
+      LocationPermission permission =
+      await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        debugPrint(
+          'LOCATION: Requesting permission...',
+        );
+
+        permission =
+        await Geolocator.requestPermission();
+      }
+
+      if (permission ==
+          LocationPermission.denied ||
+          permission ==
+              LocationPermission.deniedForever) {
+        debugPrint(
+          'LOCATION: Permission denied',
+        );
+
+        return false;
+      }
+
+      debugPrint(
+        'LOCATION: Permission available',
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint(
+        'LOCATION PERMISSION ERROR: $e',
+      );
+
+      return false;
+    }
+  }
+
+  // ==========================================================
+  // NEW: SEND CURRENT MOBILE LOCATION
+  // ==========================================================
+
+  Future<void> _sendCurrentLocation() async {
+    if (locationSending) {
+      debugPrint(
+        'LOCATION: Previous transmission still running',
+      );
+
+      return;
+    }
+
+    if (connectedDevice == null ||
+        rxCharacteristic == null) {
+      debugPrint(
+        'LOCATION: ESP32 not connected',
+      );
+
+      return;
+    }
+
+    if (!locationPermissionReady) {
+      final ready =
+      await _prepareLocationPermission();
+
+      if (!ready) {
+        debugPrint(
+          'LOCATION: Location permission unavailable',
+        );
+
+        return;
+      }
+
+      locationPermissionReady = true;
+    }
+
+    locationSending = true;
+
+    try {
+      // ======================================================
+      // GET CURRENT GPS POSITION
+      // ======================================================
+
+      debugPrint(
+        'LOCATION: Getting current GPS position...',
+      );
+
+      final position =
+      await Geolocator.getCurrentPosition(
+        locationSettings:
+        const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      // ======================================================
+      // GET MOBILE BATTERY
+      // ======================================================
+
+      final batteryLevel =
+      await battery.batteryLevel;
+
+      // ======================================================
+      // MOBILE TIMESTAMP
+      // ======================================================
+
+      final now = DateTime.now();
+
+      final timestamp =
+          '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}:'
+          '${now.second.toString().padLeft(2, '0')}';
+
+      // ======================================================
+      // CREATE PACKET
+      //
+      // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
+      // ======================================================
+
+      final packet =
+          'LOC,'
+          '$mobileDeviceId,'
+          '${position.latitude.toStringAsFixed(6)},'
+          '${position.longitude.toStringAsFixed(6)},'
+          '$timestamp,'
+          '$batteryLevel';
+
+      debugPrint(
+        '================================',
+      );
+
+      debugPrint(
+        'MOBILE LOCATION',
+      );
+
+      debugPrint(
+        'Device ID : $mobileDeviceId',
+      );
+
+      debugPrint(
+        'Latitude  : ${position.latitude}',
+      );
+
+      debugPrint(
+        'Longitude : ${position.longitude}',
+      );
+
+      debugPrint(
+        'Timestamp : $timestamp',
+      );
+
+      debugPrint(
+        'Battery   : $batteryLevel%',
+      );
+
+      debugPrint(
+        'PACKET    : $packet',
+      );
+
+      debugPrint(
+        '================================',
+      );
+
+      // ======================================================
+      // PHONE -> ESP32 USING EXISTING RX CHARACTERISTIC
+      // ======================================================
+
+      await rxCharacteristic!.write(
+        utf8.encode(packet),
+        withoutResponse: false,
+      );
+
+      debugPrint(
+        'LOCATION: Sent to ESP32 successfully',
+      );
+    } catch (e, stackTrace) {
+      debugPrint(
+        'LOCATION SEND ERROR: $e',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+    } finally {
+      locationSending = false;
+    }
+  }
+
+  // ==========================================================
   // CLEAN BLE
   // ==========================================================
 
@@ -1275,6 +1648,9 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   Future<void> disconnectDevice() async {
+    // NEW
+    _stopLocationSharing();
+
     debugPrint(
       'Disconnecting device...',
     );
@@ -2773,8 +3149,7 @@ class _ChatPageState
               ),
               child: Row(
                 crossAxisAlignment:
-                CrossAxisAlignment
-                    .end,
+                CrossAxisAlignment.end,
                 children: [
                   Expanded(
                     child: TextField(
@@ -2942,8 +3317,7 @@ class _ChatBubble
         ),
         child: Column(
           crossAxisAlignment:
-          CrossAxisAlignment
-              .end,
+          CrossAxisAlignment.end,
           children: [
             Align(
               alignment:
