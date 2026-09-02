@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,13 +8,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_mbtiles/flutter_map_mbtiles.dart';
+import 'package:flutter_map_vector_tiles/flutter_map_vector_tiles.dart'
+as vt;
 import 'package:latlong2/latlong.dart' show LatLng;
 import 'package:path_provider/path_provider.dart';
-
-// ============================================================
-// NEW: LOCATION + BATTERY
-// ============================================================
 
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
@@ -571,16 +569,6 @@ class LocationPacket {
     required this.battery,
   });
 
-  // ==========================================================
-  // PACKET FORMAT
-  //
-  // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
-  //
-  // Example:
-  //
-  // LOC,PHONE_A7F3,28.5985,77.3618,12:35:42,87
-  // ==========================================================
-
   static LocationPacket? parse(String data) {
     try {
       final parts = data.trim().split(',');
@@ -683,17 +671,202 @@ class ChatMessage {
 }
 
 // ============================================================
-// OFFLINE MBTILES MAP
+// OFFLINE VECTOR MAP STYLE
+// ============================================================
+// This is a local MapLibre-style theme.
+// The tile provider is the local Sathyamangalam PMTiles archive.
+// No internet connection is required.
+
+final Map<String, Object?> _offlineMapStyle = {
+  'version': 8,
+  'sources': {
+    'protomaps': {
+      'type': 'vector',
+    },
+  },
+  'layers': [
+    {
+      'id': 'background',
+      'type': 'background',
+      'paint': {
+        'background-color': '#F5F7FA',
+      },
+    },
+    {
+      'id': 'landcover',
+      'type': 'fill',
+      'source': 'protomaps',
+      'source-layer': 'landcover',
+      'paint': {
+        'fill-color': '#E8F0E4',
+        'fill-opacity': 0.72,
+      },
+    },
+    {
+      'id': 'landuse',
+      'type': 'fill',
+      'source': 'protomaps',
+      'source-layer': 'landuse',
+      'paint': {
+        'fill-color': '#EAF0E7',
+        'fill-opacity': 0.72,
+      },
+    },
+    {
+      'id': 'park',
+      'type': 'fill',
+      'source': 'protomaps',
+      'source-layer': 'park',
+      'paint': {
+        'fill-color': '#DDECD8',
+        'fill-opacity': 0.9,
+      },
+    },
+    {
+      'id': 'water',
+      'type': 'fill',
+      'source': 'protomaps',
+      'source-layer': 'water',
+      'paint': {
+        'fill-color': '#CFE8F7',
+      },
+    },
+    {
+      'id': 'waterway',
+      'type': 'line',
+      'source': 'protomaps',
+      'source-layer': 'waterway',
+      'paint': {
+        'line-color': '#9ED0EA',
+        'line-width': 1.4,
+      },
+    },
+    {
+      'id': 'building',
+      'type': 'fill',
+      'source': 'protomaps',
+      'source-layer': 'building',
+      'paint': {
+        'fill-color': '#E3E6EA',
+        'fill-opacity': 0.9,
+      },
+    },
+    {
+      'id': 'transportation-casing',
+      'type': 'line',
+      'source': 'protomaps',
+      'source-layer': 'transportation',
+      'paint': {
+        'line-color': '#C9CED6',
+        'line-width': 4.2,
+      },
+    },
+    {
+      'id': 'transportation',
+      'type': 'line',
+      'source': 'protomaps',
+      'source-layer': 'transportation',
+      'paint': {
+        'line-color': '#FFFFFF',
+        'line-width': 2.2,
+      },
+    },
+    {
+      'id': 'transportation-name',
+      'type': 'symbol',
+      'source': 'protomaps',
+      'source-layer': 'transportation_name',
+      'layout': {
+        'text-field': '{name}',
+        'text-size': 10,
+        'text-allow-overlap': false,
+      },
+      'paint': {
+        'text-color': '#555B66',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 1.2,
+      },
+    },
+    {
+      'id': 'water-name',
+      'type': 'symbol',
+      'source': 'protomaps',
+      'source-layer': 'water_name',
+      'layout': {
+        'text-field': '{name}',
+        'text-size': 10,
+      },
+      'paint': {
+        'text-color': '#4E8FB0',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 1,
+      },
+    },
+    {
+      'id': 'place-labels',
+      'type': 'symbol',
+      'source': 'protomaps',
+      'source-layer': 'place',
+      'layout': {
+        'text-field': '{name}',
+        'text-size': 12,
+        'text-allow-overlap': false,
+      },
+      'paint': {
+        'text-color': '#3F4652',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 1.5,
+      },
+    },
+    {
+      'id': 'poi-labels',
+      'type': 'symbol',
+      'source': 'protomaps',
+      'source-layer': 'poi',
+      'layout': {
+        'text-field': '{name}',
+        'text-size': 9,
+        'text-allow-overlap': false,
+      },
+      'paint': {
+        'text-color': '#5B6470',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 1,
+      },
+    },
+    {
+      'id': 'aerodrome-label',
+      'type': 'symbol',
+      'source': 'protomaps',
+      'source-layer': 'aerodrome_label',
+      'layout': {
+        'text-field': '{name}',
+        'text-size': 10,
+      },
+      'paint': {
+        'text-color': '#596273',
+        'text-halo-color': '#FFFFFF',
+        'text-halo-width': 1,
+      },
+    },
+  ],
+};
+
+// ============================================================
+// OFFLINE PMTILES MAP MANAGER
 // ============================================================
 
 class OfflineMapManager {
   static const String assetPath =
-      'assets/maps/noida.mbtiles';
+      'assets/maps/Sathya.pmtiles';
 
   static const String localFileName =
-      'noida.mbtiles';
+      'Sathya.pmtiles';
 
-  static Future<MbTilesTileProvider> load() async {
+  HttpServer? _server;
+  File? _file;
+
+  Future<String> start() async {
     final directory =
     await getApplicationDocumentsDirectory();
 
@@ -701,45 +874,171 @@ class OfflineMapManager {
       '${directory.path}/$localFileName',
     );
 
-    if (!await file.exists()) {
+    // The map asset is versioned so an existing installation does not
+    // accidentally keep an older PMTiles file after an APK update.
+    const assetVersion = 'sathya_v2';
+    final versionFile = File(
+      '${directory.path}/sathya_map_version.txt',
+    );
+
+    final installedVersion =
+    await versionFile.exists()
+        ? (await versionFile.readAsString()).trim()
+        : '';
+
+    if (!await file.exists() || installedVersion != assetVersion) {
       debugPrint(
-        'OFFLINE MAP: Copying MBTiles to device...',
+        'PMTILES: Installing $localFileName ($assetVersion)...',
       );
 
-      final byteData =
-      await rootBundle.load(assetPath);
+      final byteData = await rootBundle.load(assetPath);
+      final bytes = byteData.buffer.asUint8List();
 
-      final bytes =
-      byteData.buffer.asUint8List();
+      final tempFile = File('${file.path}.tmp');
+      await tempFile.writeAsBytes(bytes, flush: true);
 
-      await file.writeAsBytes(
-        bytes,
-        flush: true,
-      );
+      if (await file.exists()) {
+        await file.delete();
+      }
+      await tempFile.rename(file.path);
+      await versionFile.writeAsString(assetVersion, flush: true);
 
-      debugPrint(
-        'OFFLINE MAP: Copy completed',
-      );
+      debugPrint('PMTILES: Map installation completed');
     } else {
       debugPrint(
-        'OFFLINE MAP: Existing MBTiles found',
+        'PMTILES: Existing $localFileName ($installedVersion) found',
       );
     }
 
+    _file = file;
+
+    debugPrint('PMTILES PATH: ${file.path}');
     debugPrint(
-      'OFFLINE MAP PATH: ${file.path}',
+      'PMTILES SIZE: ${await file.length()} bytes',
     );
 
-    final provider =
-    MbTilesTileProvider.fromPath(
-      path: file.path,
+    // flutter_map_vector_tiles 2.8.1 opens PMTiles through an HTTP
+    // tile source. Android cannot use an absolute filesystem path as
+    // an HTTP URI, so expose the local PMTiles file through a tiny
+    // loopback HTTP server. The server supports HTTP Range requests,
+    // which PMTiles uses to read only the required portions of the file.
+    _server = await HttpServer.bind(
+      InternetAddress.loopbackIPv4,
+      0,
     );
 
-    debugPrint(
-      'OFFLINE MAP: Provider initialized',
-    );
+    _server!.listen(_handleRequest);
 
-    return provider;
+    final port = _server!.port;
+    final url = 'http://127.0.0.1:$port/$localFileName';
+
+    debugPrint('PMTILES LOCAL SERVER: $url');
+
+    return url;
+  }
+
+  Future<void> _handleRequest(HttpRequest request) async {
+    final response = request.response;
+    final file = _file;
+
+    if (file == null ||
+        request.uri.pathSegments.isEmpty ||
+        request.uri.pathSegments.last != localFileName) {
+      response.statusCode = HttpStatus.notFound;
+      await response.close();
+      return;
+    }
+
+    try {
+      final length = await file.length();
+
+      response.headers.set(
+        'Accept-Ranges',
+        'bytes',
+      );
+      response.headers.set(
+        'Content-Type',
+        'application/octet-stream',
+      );
+
+      if (request.method == 'HEAD') {
+        response.statusCode = HttpStatus.ok;
+        response.headers.contentLength = length;
+        await response.close();
+        return;
+      }
+
+      final rangeHeader = request.headers.value('range');
+
+      if (rangeHeader == null ||
+          !rangeHeader.startsWith('bytes=')) {
+        response.statusCode = HttpStatus.ok;
+        response.headers.contentLength = length;
+        await response.addStream(file.openRead());
+        await response.close();
+        return;
+      }
+
+      final range = rangeHeader.substring('bytes='.length).split('-');
+      final start = int.tryParse(range.first);
+
+      if (start == null || start < 0 || start >= length) {
+        response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        response.headers.set(
+          'Content-Range',
+          'bytes */$length',
+        );
+        await response.close();
+        return;
+      }
+
+      int end;
+
+      if (range.length > 1 && range[1].isNotEmpty) {
+        end = int.tryParse(range[1]) ?? (length - 1);
+      } else {
+        end = length - 1;
+      }
+
+      if (end >= length) {
+        end = length - 1;
+      }
+
+      if (end < start) {
+        response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        response.headers.set(
+          'Content-Range',
+          'bytes */$length',
+        );
+        await response.close();
+        return;
+      }
+
+      final contentLength = end - start + 1;
+
+      response.statusCode = HttpStatus.partialContent;
+      response.headers.contentLength = contentLength;
+      response.headers.set(
+        'Content-Range',
+        'bytes $start-$end/$length',
+      );
+
+      await response.addStream(
+        file.openRead(start, end + 1),
+      );
+      await response.close();
+    } catch (e) {
+      debugPrint('PMTILES SERVER ERROR: $e');
+      try {
+        await response.close();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> dispose() async {
+    await _server?.close(force: true);
+    _server = null;
+    _file = null;
   }
 }
 
@@ -757,15 +1056,30 @@ class DevicePage extends StatefulWidget {
 class _DevicePageState extends State<DevicePage> {
   final List<ScanResult> scanResults = [];
 
-  // ==========================================================
-  // RECEIVED LOCATION DATABASE
-  //
-  // One entry per Device ID.
-  // ==========================================================
-
   final Map<String, LocationPacket> receivedLocations = {};
 
-  MbTilesTileProvider? offlineTileProvider;
+  // ==========================================================
+  // LIVE PHONE LOCATION
+  // ==========================================================
+
+  final MapController _mapController = MapController();
+
+  StreamSubscription<Position>? positionSubscription;
+
+  LatLng? currentLocation;
+
+  bool _mapReady = false;
+  bool _hasCenteredOnLocation = false;
+
+  // ==========================================================
+  // PMTILES VECTOR MAP
+  // ==========================================================
+
+  vt.PmTilesVectorTileProvider? pmtilesProvider;
+
+  final OfflineMapManager _offlineMapManager = OfflineMapManager();
+
+  vt.Theme? mapTheme;
 
   bool mapLoading = true;
   String? mapError;
@@ -805,7 +1119,7 @@ class _DevicePageState extends State<DevicePage> {
   );
 
   // ==========================================================
-  // NEW: MOBILE LOCATION SHARING
+  // LOCATION SHARING
   // ==========================================================
 
   Timer? locationTimer;
@@ -840,13 +1154,13 @@ class _DevicePageState extends State<DevicePage> {
 
     _initializeOfflineMap();
 
-    // NEW:
-    // Create/load a persistent phone ID.
     _initializeMobileDeviceId();
+
+    _initializeLiveLocation();
   }
 
   // ==========================================================
-  // NEW: INITIALIZE MOBILE DEVICE ID
+  // MOBILE DEVICE ID
   // ==========================================================
 
   Future<void> _initializeMobileDeviceId() async {
@@ -922,29 +1236,49 @@ class _DevicePageState extends State<DevicePage> {
   Future<void> _initializeOfflineMap() async {
     try {
       debugPrint(
-        'OFFLINE MAP: Initializing...',
+        'PMTILES: Initializing Sathya offline map...',
       );
 
-      final provider =
-      await OfflineMapManager.load();
+      final pmtilesUrl =
+      await _offlineMapManager.start();
 
       if (!mounted) {
-        provider.dispose();
+        await _offlineMapManager.dispose();
         return;
       }
 
+      debugPrint(
+        'PMTILES: Opening local vector tile provider...',
+      );
+
+      final provider =
+      await vt.PmTilesVectorTileProvider.open(
+        pmtilesUrl,
+      );
+
+      debugPrint(
+        'PMTILES: Creating offline map theme...',
+      );
+
+      final theme = vt.ThemeReader(
+        logger: const vt.Logger.console(),
+      ).read(_offlineMapStyle);
+
+      if (!mounted) return;
+
       setState(() {
-        offlineTileProvider = provider;
+        pmtilesProvider = provider;
+        mapTheme = theme;
         mapLoading = false;
         mapError = null;
       });
 
       debugPrint(
-        'OFFLINE MAP: READY',
+        'PMTILES: READY',
       );
     } catch (e, stackTrace) {
       debugPrint(
-        'OFFLINE MAP ERROR: $e',
+        'PMTILES ERROR: $e',
       );
 
       debugPrint(
@@ -966,14 +1300,14 @@ class _DevicePageState extends State<DevicePage> {
 
   @override
   void dispose() {
-    // NEW
     locationTimer?.cancel();
+    positionSubscription?.cancel();
 
     scanSubscription?.cancel();
     connectionSubscription?.cancel();
     notificationSubscription?.cancel();
 
-    offlineTileProvider?.dispose();
+    _offlineMapManager.dispose();
 
     super.dispose();
   }
@@ -988,7 +1322,7 @@ class _DevicePageState extends State<DevicePage> {
     setState(() {
       scanResults.clear();
       isScanning = true;
-      status = 'Scanning for devices...';
+      status = 'Checking Bluetooth...';
     });
 
     try {
@@ -1006,8 +1340,59 @@ class _DevicePageState extends State<DevicePage> {
         return;
       }
 
+      final locationEnabled =
+      await Geolocator.isLocationServiceEnabled();
+
+      if (!locationEnabled) {
+        if (!mounted) return;
+
+        setState(() {
+          status =
+          'Turn ON Location to scan Bluetooth';
+          isScanning = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Please turn ON Location in phone Settings, then scan again.',
+            ),
+          ),
+        );
+
+        return;
+      }
+
+      LocationPermission permission =
+      await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission =
+        await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission ==
+              LocationPermission.deniedForever) {
+        if (!mounted) return;
+
+        setState(() {
+          status = 'Location permission required';
+          isScanning = false;
+        });
+
+        return;
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        status = 'Scanning for devices...';
+      });
+
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 5),
+        androidUsesFineLocation: true,
       );
 
       if (!mounted) return;
@@ -1019,9 +1404,13 @@ class _DevicePageState extends State<DevicePage> {
             ? 'No devices found'
             : '${scanResults.length} device(s) found';
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint(
         'SCAN ERROR: $e',
+      );
+
+      debugPrint(
+        stackTrace.toString(),
       );
 
       if (!mounted) return;
@@ -1038,7 +1427,8 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   Future<void> connectToDevice(
-      BluetoothDevice device) async {
+      BluetoothDevice device,
+      ) async {
     if (isConnecting) return;
 
     if (connectedDevice != null) {
@@ -1067,10 +1457,6 @@ class _DevicePageState extends State<DevicePage> {
         'CONNECTED: ${device.platformName}',
       );
 
-      // --------------------------------------------------------
-      // Connection state listener
-      // --------------------------------------------------------
-
       await connectionSubscription?.cancel();
 
       connectionSubscription =
@@ -1088,7 +1474,6 @@ class _DevicePageState extends State<DevicePage> {
                   status = 'Connected';
                 });
               } else {
-                // NEW
                 _stopLocationSharing();
 
                 setState(() {
@@ -1100,10 +1485,6 @@ class _DevicePageState extends State<DevicePage> {
               }
             },
           );
-
-      // --------------------------------------------------------
-      // Discover BLE services
-      // --------------------------------------------------------
 
       await discoverServices(device);
 
@@ -1121,21 +1502,7 @@ class _DevicePageState extends State<DevicePage> {
         status = 'Connected';
       });
 
-      // ========================================================
-      // NEW:
-      // START MOBILE LOCATION SHARING
-      // ========================================================
-
       await _startLocationSharing();
-
-      // --------------------------------------------------------
-      // IMPORTANT:
-      //
-      // NO CHAT NAVIGATION HERE.
-      //
-      // User must press CHAT manually.
-      // --------------------------------------------------------
-
     } catch (e, stackTrace) {
       debugPrint(
         'CONNECTION ERROR: $e',
@@ -1149,9 +1516,7 @@ class _DevicePageState extends State<DevicePage> {
 
       try {
         await device.disconnect();
-      } catch (_) {
-        // Device may already be disconnected.
-      }
+      } catch (_) {}
 
       if (!mounted) return;
 
@@ -1168,7 +1533,8 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   Future<void> discoverServices(
-      BluetoothDevice device) async {
+      BluetoothDevice device,
+      ) async {
     debugPrint(
       '========== SERVICE DISCOVERY ==========',
     );
@@ -1194,10 +1560,6 @@ class _DevicePageState extends State<DevicePage> {
           'CHARACTERISTIC: ${characteristic.uuid}',
         );
 
-        // ------------------------------------------------------
-        // PHONE -> ESP32
-        // ------------------------------------------------------
-
         if (characteristic.uuid == rxUuid) {
           foundRx = characteristic;
 
@@ -1205,10 +1567,6 @@ class _DevicePageState extends State<DevicePage> {
             'RX CHARACTERISTIC FOUND',
           );
         }
-
-        // ------------------------------------------------------
-        // ESP32 -> PHONE
-        // ------------------------------------------------------
 
         if (characteristic.uuid == txUuid) {
           foundTx = characteristic;
@@ -1235,10 +1593,6 @@ class _DevicePageState extends State<DevicePage> {
     rxCharacteristic = foundRx;
     txCharacteristic = foundTx;
 
-    // ========================================================
-    // LISTENER CREATED BEFORE NOTIFICATIONS ENABLED
-    // ========================================================
-
     await notificationSubscription?.cancel();
 
     notificationSubscription =
@@ -1251,10 +1605,6 @@ class _DevicePageState extends State<DevicePage> {
           },
           cancelOnError: false,
         );
-
-    // --------------------------------------------------------
-    // Enable notifications
-    // --------------------------------------------------------
 
     await txCharacteristic!.setNotifyValue(true);
 
@@ -1272,7 +1622,8 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   void handleIncomingBleData(
-      List<int> value) {
+      List<int> value,
+      ) {
     if (value.isEmpty) return;
 
     final message = utf8.decode(
@@ -1297,12 +1648,6 @@ class _DevicePageState extends State<DevicePage> {
     debugPrint(
       '================================',
     );
-
-    // ========================================================
-    // LOCATION PACKET
-    //
-    // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
-    // ========================================================
 
     final packet =
     LocationPacket.parse(message);
@@ -1342,20 +1687,101 @@ class _DevicePageState extends State<DevicePage> {
       return;
     }
 
-    // --------------------------------------------------------
-    // Normal text packet.
-    //
-    // Do not put it into the map.
-    // ChatPage handles normal messages when open.
-    // --------------------------------------------------------
-
     debugPrint(
       'NORMAL BLE MESSAGE',
     );
   }
 
   // ==========================================================
-  // NEW: START LOCATION SHARING
+  // LIVE MAP LOCATION
+  // ==========================================================
+
+  Future<void> _initializeLiveLocation() async {
+    try {
+      final ready = await _prepareLocationPermission();
+
+      if (!ready) {
+        debugPrint(
+          'MAP LOCATION: Permission/service not ready',
+        );
+        return;
+      }
+
+      locationPermissionReady = true;
+
+      debugPrint(
+        'MAP LOCATION: Getting current GPS position...',
+      );
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      _updateCurrentMapLocation(position, centerMap: true);
+
+      positionSubscription?.cancel();
+      positionSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5,
+        ),
+      ).listen(
+            (position) {
+          _updateCurrentMapLocation(position);
+        },
+        onError: (error) {
+          debugPrint('MAP LOCATION STREAM ERROR: $error');
+        },
+      );
+    } catch (e, stackTrace) {
+      debugPrint('MAP LOCATION ERROR: $e');
+      debugPrint(stackTrace.toString());
+    }
+  }
+
+  void _updateCurrentMapLocation(
+      Position position, {
+        bool centerMap = false,
+      }) {
+    if (!mounted) return;
+
+    final location = LatLng(
+      position.latitude,
+      position.longitude,
+    );
+
+    setState(() {
+      currentLocation = location;
+    });
+
+    if ((_mapReady && !_hasCenteredOnLocation) || centerMap) {
+      if (_mapReady) {
+        _mapController.move(location, 14);
+        _hasCenteredOnLocation = true;
+      }
+    }
+
+    debugPrint(
+      'MAP LOCATION: ${position.latitude}, ${position.longitude}',
+    );
+  }
+
+  void _centerOnCurrentLocation() {
+    final location = currentLocation;
+
+    if (location == null) {
+      _initializeLiveLocation();
+      return;
+    }
+
+    _mapController.move(location, 14);
+    _hasCenteredOnLocation = true;
+  }
+
+  // ==========================================================
+  // START LOCATION SHARING
   // ==========================================================
 
   Future<void> _startLocationSharing() async {
@@ -1383,18 +1809,9 @@ class _DevicePageState extends State<DevicePage> {
 
     locationPermissionReady = true;
 
-    // Cancel any old timer.
     locationTimer?.cancel();
 
-    // --------------------------------------------------------
-    // SEND ONE LOCATION IMMEDIATELY
-    // --------------------------------------------------------
-
     await _sendCurrentLocation();
-
-    // --------------------------------------------------------
-    // THEN SEND EVERY 30 SECONDS
-    // --------------------------------------------------------
 
     locationTimer = Timer.periodic(
       const Duration(seconds: 30),
@@ -1409,7 +1826,7 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   // ==========================================================
-  // NEW: STOP LOCATION SHARING
+  // STOP LOCATION SHARING
   // ==========================================================
 
   void _stopLocationSharing() {
@@ -1424,7 +1841,7 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   // ==========================================================
-  // NEW: LOCATION PERMISSION
+  // LOCATION PERMISSION
   // ==========================================================
 
   Future<bool> _prepareLocationPermission() async {
@@ -1443,7 +1860,8 @@ class _DevicePageState extends State<DevicePage> {
       LocationPermission permission =
       await Geolocator.checkPermission();
 
-      if (permission == LocationPermission.denied) {
+      if (permission ==
+          LocationPermission.denied) {
         debugPrint(
           'LOCATION: Requesting permission...',
         );
@@ -1478,7 +1896,7 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   // ==========================================================
-  // NEW: SEND CURRENT MOBILE LOCATION
+  // SEND CURRENT MOBILE LOCATION
   // ==========================================================
 
   Future<void> _sendCurrentLocation() async {
@@ -1517,10 +1935,6 @@ class _DevicePageState extends State<DevicePage> {
     locationSending = true;
 
     try {
-      // ======================================================
-      // GET CURRENT GPS POSITION
-      // ======================================================
-
       debugPrint(
         'LOCATION: Getting current GPS position...',
       );
@@ -1533,16 +1947,8 @@ class _DevicePageState extends State<DevicePage> {
         ),
       );
 
-      // ======================================================
-      // GET MOBILE BATTERY
-      // ======================================================
-
       final batteryLevel =
       await battery.batteryLevel;
-
-      // ======================================================
-      // MOBILE TIMESTAMP
-      // ======================================================
 
       final now = DateTime.now();
 
@@ -1550,12 +1956,6 @@ class _DevicePageState extends State<DevicePage> {
           '${now.hour.toString().padLeft(2, '0')}:'
           '${now.minute.toString().padLeft(2, '0')}:'
           '${now.second.toString().padLeft(2, '0')}';
-
-      // ======================================================
-      // CREATE PACKET
-      //
-      // LOC,DeviceID,Latitude,Longitude,Timestamp,Battery
-      // ======================================================
 
       final packet =
           'LOC,'
@@ -1601,10 +2001,6 @@ class _DevicePageState extends State<DevicePage> {
         '================================',
       );
 
-      // ======================================================
-      // PHONE -> ESP32 USING EXISTING RX CHARACTERISTIC
-      // ======================================================
-
       await rxCharacteristic!.write(
         utf8.encode(packet),
         withoutResponse: false,
@@ -1648,7 +2044,6 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   Future<void> disconnectDevice() async {
-    // NEW
     _stopLocationSharing();
 
     debugPrint(
@@ -1683,7 +2078,8 @@ class _DevicePageState extends State<DevicePage> {
   // ==========================================================
 
   String getDeviceName(
-      BluetoothDevice device) {
+      BluetoothDevice device,
+      ) {
     final name = device.platformName;
 
     if (name.isNotEmpty) {
@@ -1694,14 +2090,10 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   // ==========================================================
-  // OFFLINE MAP
+  // OFFLINE PMTILES MAP
   // ==========================================================
 
   Widget _buildOfflineMap() {
-    // --------------------------------------------------------
-    // Loading
-    // --------------------------------------------------------
-
     if (mapLoading) {
       return const Center(
         child: Column(
@@ -1716,7 +2108,7 @@ class _DevicePageState extends State<DevicePage> {
             ),
             SizedBox(height: 12),
             Text(
-              'Loading offline map...',
+              'Loading Sathya offline map...',
               style: TextStyle(
                 fontSize: 12,
                 color: Color(0xFF697487),
@@ -1728,11 +2120,8 @@ class _DevicePageState extends State<DevicePage> {
       );
     }
 
-    // --------------------------------------------------------
-    // Error
-    // --------------------------------------------------------
-
-    if (offlineTileProvider == null) {
+    if (pmtilesProvider == null ||
+        mapTheme == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -1746,7 +2135,7 @@ class _DevicePageState extends State<DevicePage> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'Offline map unavailable',
+                'Sathya offline map unavailable',
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -1755,9 +2144,9 @@ class _DevicePageState extends State<DevicePage> {
               ),
               const SizedBox(height: 6),
               Text(
-                mapError ?? 'Unknown map error',
+                mapError ?? 'Unknown PMTiles error',
                 textAlign: TextAlign.center,
-                maxLines: 4,
+                maxLines: 5,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 10,
@@ -1770,66 +2159,63 @@ class _DevicePageState extends State<DevicePage> {
       );
     }
 
-    // --------------------------------------------------------
+    // ========================================================
     // MARKERS
-    // --------------------------------------------------------
+    // ========================================================
 
     final List<Marker> markers = [];
 
-    // ========================================================
-    // PHONE / TEST LOCATION
-    // ========================================================
+    // --------------------------------------------------------
+    // PHONE / ACTUAL GPS LOCATION
+    // --------------------------------------------------------
 
-    markers.add(
-      Marker(
-        point: const LatLng(
-          28.5970,
-          77.3595,
-        ),
-        width: 70,
-        height: 65,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding:
-              const EdgeInsets.symmetric(
-                horizontal: 7,
-                vertical: 3,
-              ),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1769E0),
-                borderRadius:
-                BorderRadius.circular(6),
-                boxShadow: const [
-                  BoxShadow(
-                    blurRadius: 4,
-                    color: Colors.black26,
+    if (currentLocation != null) {
+      markers.add(
+        Marker(
+          point: currentLocation!,
+          width: 84,
+          height: 76,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 7,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1769E0),
+                  borderRadius: BorderRadius.circular(6),
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 4,
+                      color: Colors.black26,
+                    ),
+                  ],
+                ),
+                child: const Text(
+                  'PHONE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
                   ),
-                ],
-              ),
-              child: const Text(
-                'PHONE',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
                 ),
               ),
-            ),
-            const Icon(
-              Icons.location_on_rounded,
-              color: Color(0xFF1769E0),
-              size: 38,
-            ),
-          ],
+              const Icon(
+                Icons.my_location_rounded,
+                color: Color(0xFF1769E0),
+                size: 38,
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
+    }
 
-    // ========================================================
+    // --------------------------------------------------------
     // RECEIVED DEVICES
-    // ========================================================
+    // --------------------------------------------------------
 
     for (final packet
     in receivedLocations.values) {
@@ -1845,8 +2231,7 @@ class _DevicePageState extends State<DevicePage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                constraints:
-                const BoxConstraints(
+                constraints: const BoxConstraints(
                   maxWidth: 90,
                 ),
                 padding:
@@ -1892,23 +2277,63 @@ class _DevicePageState extends State<DevicePage> {
     // MAP
     // ========================================================
 
-    return FlutterMap(
-      options: const MapOptions(
-        initialCenter: LatLng(
-          28.5970,
-          77.3595,
-        ),
-        initialZoom: 13,
-        minZoom: 10,
-        maxZoom: 18,
-      ),
+    final mapCenter =
+        currentLocation ?? const LatLng(11.337, 77.115);
+
+    return Stack(
       children: [
-        TileLayer(
-          tileProvider: offlineTileProvider!,
-          tileSize: 256,
+        FlutterMap(
+          mapController: _mapController,
+          options: MapOptions(
+            initialCenter: mapCenter,
+            initialZoom: 14,
+            minZoom: 8,
+            maxZoom: 16,
+            onMapReady: () {
+              _mapReady = true;
+
+              final location = currentLocation;
+              if (location != null && !_hasCenteredOnLocation) {
+                _mapController.move(location, 14);
+                _hasCenteredOnLocation = true;
+              }
+            },
+          ),
+          children: [
+            vt.VectorTileLayer(
+              theme: mapTheme!,
+              tileProviders: vt.TileProviders({
+                'protomaps': pmtilesProvider!,
+              }),
+              showLabels: true,
+              logger: const vt.Logger.console(),
+            ),
+            MarkerLayer(
+              markers: markers,
+            ),
+          ],
         ),
-        MarkerLayer(
-          markers: markers,
+        Positioned(
+          right: 12,
+          bottom: 12,
+          child: Material(
+            color: Colors.white,
+            elevation: 3,
+            borderRadius: BorderRadius.circular(28),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(28),
+              onTap: _centerOnCurrentLocation,
+              child: const SizedBox(
+                width: 52,
+                height: 52,
+                child: Icon(
+                  Icons.my_location_rounded,
+                  color: Color(0xFF1769E0),
+                  size: 25,
+                ),
+              ),
+            ),
+          ),
         ),
       ],
     );
@@ -2131,7 +2556,8 @@ class _DevicePageState extends State<DevicePage> {
                     result.device;
 
                 final isConnected =
-                    connectedDevice != null &&
+                    connectedDevice !=
+                        null &&
                         connectedDevice!
                             .remoteId ==
                             device.remoteId;
@@ -2153,28 +2579,13 @@ class _DevicePageState extends State<DevicePage> {
                     isConnected,
                     connecting:
                     isConnecting,
-
-                    // ----------------------------
-                    // CONNECT
-                    // ----------------------------
-
                     onConnect: () {
                       connectToDevice(
                         device,
                       );
                     },
-
-                    // ----------------------------
-                    // DISCONNECT
-                    // ----------------------------
-
                     onDisconnect:
                     disconnectDevice,
-
-                    // ----------------------------
-                    // CHAT
-                    // ----------------------------
-
                     onChat:
                     isConnected &&
                         rxCharacteristic !=
@@ -2269,9 +2680,7 @@ class _DeviceCard extends StatelessWidget {
               Color(0xFF1769E0),
             ),
           ),
-
           const SizedBox(width: 11),
-
           Expanded(
             child: Column(
               crossAxisAlignment:
@@ -2291,9 +2700,7 @@ class _DeviceCard extends StatelessWidget {
                     Color(0xFF202A3A),
                   ),
                 ),
-
                 const SizedBox(height: 3),
-
                 Text(
                   id,
                   maxLines: 1,
@@ -2306,9 +2713,7 @@ class _DeviceCard extends StatelessWidget {
                     Color(0xFF8A94A4),
                   ),
                 ),
-
                 const SizedBox(height: 4),
-
                 Text(
                   'RSSI $rssi dBm',
                   style:
@@ -2321,22 +2726,12 @@ class _DeviceCard extends StatelessWidget {
               ],
             ),
           ),
-
           const SizedBox(width: 8),
-
-          // ==================================================
-          // CONNECTED
-          // ==================================================
-
           if (connected)
             Row(
               mainAxisSize:
               MainAxisSize.min,
               children: [
-                // --------------------------------------------
-                // CHAT
-                // --------------------------------------------
-
                 SizedBox(
                   height: 34,
                   child:
@@ -2356,8 +2751,7 @@ class _DeviceCard extends StatelessWidget {
                       ),
                     ),
                     style:
-                    OutlinedButton
-                        .styleFrom(
+                    OutlinedButton.styleFrom(
                       foregroundColor:
                       const Color(
                         0xFF1769E0,
@@ -2385,13 +2779,7 @@ class _DeviceCard extends StatelessWidget {
                     ),
                   ),
                 ),
-
                 const SizedBox(width: 6),
-
-                // --------------------------------------------
-                // DISCONNECT
-                // --------------------------------------------
-
                 SizedBox(
                   height: 34,
                   child:
@@ -2399,8 +2787,7 @@ class _DeviceCard extends StatelessWidget {
                     onPressed:
                     onDisconnect,
                     style:
-                    ElevatedButton
-                        .styleFrom(
+                    ElevatedButton.styleFrom(
                       backgroundColor:
                       const Color(
                         0xFFFCECEC,
@@ -2438,22 +2825,17 @@ class _DeviceCard extends StatelessWidget {
                 ),
               ],
             )
-
-          // ==================================================
-          // NOT CONNECTED
-          // ==================================================
-
           else
             SizedBox(
               height: 34,
-              child: ElevatedButton(
+              child:
+              ElevatedButton(
                 onPressed:
                 connecting
                     ? null
                     : onConnect,
                 style:
-                ElevatedButton
-                    .styleFrom(
+                ElevatedButton.styleFrom(
                   elevation: 0,
                   padding:
                   const EdgeInsets
@@ -2537,20 +2919,12 @@ class _ChatPageState
     '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
   );
 
-  // ==========================================================
-  // INIT
-  // ==========================================================
-
   @override
   void initState() {
     super.initState();
 
     setupNotifications();
   }
-
-  // ==========================================================
-  // SETUP NOTIFICATIONS
-  // ==========================================================
 
   Future<void> setupNotifications() async {
     try {
@@ -2565,8 +2939,7 @@ class _ChatPageState
       for (final service
       in services) {
         for (final characteristic
-        in service
-            .characteristics) {
+        in service.characteristics) {
           if (characteristic.uuid ==
               txUuid) {
             txCharacteristic =
@@ -2622,12 +2995,9 @@ class _ChatPageState
     }
   }
 
-  // ==========================================================
-  // BLE RECEIVE
-  // ==========================================================
-
   void handleIncomingBleData(
-      List<int> value) {
+      List<int> value,
+      ) {
     if (value.isEmpty) return;
 
     final message = utf8.decode(
@@ -2653,12 +3023,6 @@ class _ChatPageState
       '================================',
     );
 
-    // --------------------------------------------------------
-    // Ignore location packets here.
-    //
-    // DevicePage handles location packets.
-    // --------------------------------------------------------
-
     final locationPacket =
     LocationPacket.parse(
       message,
@@ -2671,10 +3035,6 @@ class _ChatPageState
 
       return;
     }
-
-    // --------------------------------------------------------
-    // Normal chat message
-    // --------------------------------------------------------
 
     if (!mounted) return;
 
@@ -2691,12 +3051,9 @@ class _ChatPageState
     scrollChatToBottom();
   }
 
-  // ==========================================================
-  // SEND MESSAGE
-  // ==========================================================
-
   Future<void> sendChatMessage(
-      String message) async {
+      String message,
+      ) async {
     message = message.trim();
 
     if (message.isEmpty) return;
@@ -2770,10 +3127,6 @@ class _ChatPageState
     }
   }
 
-  // ==========================================================
-  // DISCONNECT
-  // ==========================================================
-
   Future<void>
   disconnectFromChat() async {
     await notificationSubscription
@@ -2797,10 +3150,6 @@ class _ChatPageState
 
     Navigator.of(context).pop();
   }
-
-  // ==========================================================
-  // SCROLL
-  // ==========================================================
 
   void scrollChatToBottom() {
     WidgetsBinding.instance
@@ -2826,12 +3175,9 @@ class _ChatPageState
     );
   }
 
-  // ==========================================================
-  // TIME
-  // ==========================================================
-
   String formatTime(
-      DateTime time) {
+      DateTime time,
+      ) {
     final hour = time.hour
         .toString()
         .padLeft(2, '0');
@@ -2842,10 +3188,6 @@ class _ChatPageState
 
     return '$hour:$minute';
   }
-
-  // ==========================================================
-  // DISPOSE
-  // ==========================================================
 
   @override
   void dispose() {
@@ -2859,10 +3201,6 @@ class _ChatPageState
 
     super.dispose();
   }
-
-  // ==========================================================
-  // BUILD
-  // ==========================================================
 
   @override
   Widget build(BuildContext context) {
@@ -2878,9 +3216,7 @@ class _ChatPageState
                 .pop();
           },
         ),
-
         titleSpacing: 0,
-
         title: Row(
           children: [
             Container(
@@ -2906,9 +3242,7 @@ class _ChatPageState
                 ),
               ),
             ),
-
             const SizedBox(width: 10),
-
             Expanded(
               child: Column(
                 crossAxisAlignment:
@@ -2933,7 +3267,6 @@ class _ChatPageState
                       FontWeight.w700,
                     ),
                   ),
-
                   Row(
                     children: [
                       Container(
@@ -2948,11 +3281,9 @@ class _ChatPageState
                           Colors.green,
                         ),
                       ),
-
                       const SizedBox(
                         width: 5,
                       ),
-
                       const Text(
                         'Connected',
                         style:
@@ -2972,13 +3303,8 @@ class _ChatPageState
           ],
         ),
       ),
-
       body: Column(
         children: [
-          // ====================================================
-          // CHAT INFO
-          // ====================================================
-
           Container(
             width: double.infinity,
             padding:
@@ -3014,11 +3340,6 @@ class _ChatPageState
               ),
             ),
           ),
-
-          // ====================================================
-          // MESSAGES
-          // ====================================================
-
           Expanded(
             child: messages.isEmpty
                 ? Center(
@@ -3053,11 +3374,9 @@ class _ChatPageState
                       ),
                     ),
                   ),
-
                   const SizedBox(
                     height: 12,
                   ),
-
                   const Text(
                     'No messages yet',
                     style:
@@ -3072,11 +3391,9 @@ class _ChatPageState
                       ),
                     ),
                   ),
-
                   const SizedBox(
                     height: 4,
                   ),
-
                   const Text(
                     'Send a message to the ESP32',
                     style:
@@ -3120,11 +3437,6 @@ class _ChatPageState
               },
             ),
           ),
-
-          // ====================================================
-          // INPUT
-          // ====================================================
-
           SafeArea(
             child: Container(
               padding:
@@ -3149,7 +3461,8 @@ class _ChatPageState
               ),
               child: Row(
                 crossAxisAlignment:
-                CrossAxisAlignment.end,
+                CrossAxisAlignment
+                    .end,
                 children: [
                   Expanded(
                     child: TextField(
@@ -3190,11 +3503,9 @@ class _ChatPageState
                       },
                     ),
                   ),
-
                   const SizedBox(
                     width: 7,
                   ),
-
                   SizedBox(
                     width: 45,
                     height: 45,
@@ -3335,11 +3646,9 @@ class _ChatBubble
                 ),
               ),
             ),
-
             const SizedBox(
               height: 3,
             ),
-
             Text(
               time,
               style: TextStyle(
