@@ -15,6 +15,8 @@ import 'package:path_provider/path_provider.dart';
 
 import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 void main() {
   runApp(const LoraTrackerApp());
@@ -658,16 +660,176 @@ class LocationPacket {
 // MESSAGE MODEL
 // ============================================================
 
+enum ChatMessageType { text, voice }
+
 class ChatMessage {
   final String text;
   final bool fromMe;
   final DateTime time;
+  final ChatMessageType type;
+  final String? audioPath;
+  final Duration? audioDuration;
 
   const ChatMessage({
     required this.text,
     required this.fromMe,
     required this.time,
+    this.type = ChatMessageType.text,
+    this.audioPath,
+    this.audioDuration,
   });
+
+  bool get isVoice => type == ChatMessageType.voice;
+}
+
+// ============================================================
+// VOICE PACKET PROTOCOL
+// ============================================================
+// The phone does ALL audio work. ESP32 only forwards these bytes
+// between BLE and LoRa.
+//
+// Frame:
+// VOIC | version | messageId | chunk | total | flags | length | payload | CRC16
+//   4        1          4          2       2       1       2        N        2
+//
+// Payload is compressed AAC-LC/M4A data.
+
+class VoicePacket {
+  static const List<int> magic = [0x56, 0x4F, 0x49, 0x43]; // VOIC
+  static const int version = 1;
+  static const int headerSize = 16;
+  static const int crcSize = 2;
+  static const int maxPayload = 80;
+
+  final int messageId;
+  final int chunkIndex;
+  final int totalChunks;
+  final int flags;
+  final List<int> payload;
+
+  const VoicePacket({
+    required this.messageId,
+    required this.chunkIndex,
+    required this.totalChunks,
+    required this.flags,
+    required this.payload,
+  });
+
+  bool get isStart => (flags & 0x01) != 0;
+  bool get isEnd => (flags & 0x02) != 0;
+
+  List<int> encode() {
+    final bytes = <int>[];
+    bytes.addAll(magic);
+    bytes.add(version);
+    _writeUint32(bytes, messageId);
+    _writeUint16(bytes, chunkIndex);
+    _writeUint16(bytes, totalChunks);
+    bytes.add(flags & 0xFF);
+    _writeUint16(bytes, payload.length);
+    bytes.addAll(payload);
+
+    final crc = crc16(bytes);
+    _writeUint16(bytes, crc);
+    return bytes;
+  }
+
+  static VoicePacket? decode(List<int> bytes) {
+    try {
+      if (bytes.length < headerSize + crcSize) return null;
+      for (var i = 0; i < magic.length; i++) {
+        if (bytes[i] != magic[i]) return null;
+      }
+      if (bytes[4] != version) return null;
+
+      final messageId = _readUint32(bytes, 5);
+      final chunkIndex = _readUint16(bytes, 9);
+      final totalChunks = _readUint16(bytes, 11);
+      final flags = bytes[13];
+      final payloadLength = _readUint16(bytes, 14);
+
+      final expectedLength = headerSize + payloadLength + crcSize;
+      if (bytes.length != expectedLength) return null;
+      if (totalChunks == 0 || chunkIndex >= totalChunks) return null;
+
+      final payloadStart = headerSize;
+      final payloadEnd = payloadStart + payloadLength;
+      final receivedCrc = _readUint16(bytes, payloadEnd);
+      final calculatedCrc = crc16(bytes.sublist(0, payloadEnd));
+      if (receivedCrc != calculatedCrc) {
+        debugPrint('VOICE: CRC error on chunk $chunkIndex');
+        return null;
+      }
+
+      return VoicePacket(
+        messageId: messageId,
+        chunkIndex: chunkIndex,
+        totalChunks: totalChunks,
+        flags: flags,
+        payload: List<int>.from(bytes.sublist(payloadStart, payloadEnd)),
+      );
+    } catch (e) {
+      debugPrint('VOICE: packet decode error: $e');
+      return null;
+    }
+  }
+
+  static void _writeUint16(List<int> out, int value) {
+    out.add((value >> 8) & 0xFF);
+    out.add(value & 0xFF);
+  }
+
+  static void _writeUint32(List<int> out, int value) {
+    out.add((value >> 24) & 0xFF);
+    out.add((value >> 16) & 0xFF);
+    out.add((value >> 8) & 0xFF);
+    out.add(value & 0xFF);
+  }
+
+  static int _readUint16(List<int> data, int offset) =>
+      (data[offset] << 8) | data[offset + 1];
+
+  static int _readUint32(List<int> data, int offset) =>
+      (data[offset] << 24) |
+      (data[offset + 1] << 16) |
+      (data[offset + 2] << 8) |
+      data[offset + 3];
+
+  static int crc16(List<int> data) {
+    var crc = 0xFFFF;
+    for (final byte in data) {
+      crc ^= byte;
+      for (var i = 0; i < 8; i++) {
+        if ((crc & 1) != 0) {
+          crc = (crc >> 1) ^ 0xA001;
+        } else {
+          crc >>= 1;
+        }
+      }
+    }
+    return crc & 0xFFFF;
+  }
+}
+
+class _IncomingVoiceMessage {
+  final int totalChunks;
+  final Map<int, List<int>> chunks = {};
+
+  _IncomingVoiceMessage(this.totalChunks);
+
+  bool get complete => chunks.length == totalChunks;
+
+  List<int> assemble() {
+    final output = <int>[];
+    for (var i = 0; i < totalChunks; i++) {
+      final chunk = chunks[i];
+      if (chunk == null) {
+        throw StateError('Missing voice chunk $i');
+      }
+      output.addAll(chunk);
+    }
+    return output;
+  }
 }
 
 // ============================================================
@@ -2875,12 +3037,8 @@ class _DeviceCard extends StatelessWidget {
 
 class ChatPage extends StatefulWidget {
   final BluetoothDevice device;
-
-  final BluetoothCharacteristic
-  rxCharacteristic;
-
-  final Future<void> Function()
-  onDisconnect;
+  final BluetoothCharacteristic rxCharacteristic;
+  final Future<void> Function() onDisconnect;
 
   const ChatPage({
     super.key,
@@ -2890,30 +3048,33 @@ class ChatPage extends StatefulWidget {
   });
 
   @override
-  State<ChatPage> createState() =>
-      _ChatPageState();
+  State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState
-    extends State<ChatPage> {
-  final TextEditingController
-  messageController =
-  TextEditingController();
-
-  final ScrollController
-  chatScrollController =
-  ScrollController();
-
+class _ChatPageState extends State<ChatPage> {
+  final TextEditingController messageController = TextEditingController();
+  final ScrollController chatScrollController = ScrollController();
   final List<ChatMessage> messages = [];
 
-  BluetoothCharacteristic?
-  txCharacteristic;
+  BluetoothCharacteristic? txCharacteristic;
+  StreamSubscription<List<int>>? notificationSubscription;
 
-  StreamSubscription<List<int>>?
-  notificationSubscription;
+  final AudioRecorder _recorder = AudioRecorder();
+  final Map<int, _IncomingVoiceMessage> _incomingVoiceMessages = {};
+  final Map<int, AudioPlayer> _players = {};
 
   bool isConnected = true;
   bool isSending = false;
+  bool isRecording = false;
+  bool isVoiceSending = false;
+  int recordingSeconds = 0;
+  Timer? recordingTimer;
+  String? recordingPath;
+
+  static const int maxVoiceSeconds = 5;
+  static const int voiceBitRate = 16000;
+  static const int voiceSampleRate = 16000;
+  static const int interPacketDelayMs = 25;
 
   final Guid txUuid = Guid(
     '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
@@ -2922,122 +3083,67 @@ class _ChatPageState
   @override
   void initState() {
     super.initState();
-
     setupNotifications();
   }
 
   Future<void> setupNotifications() async {
     try {
-      debugPrint(
-        'CHAT: discovering services...',
-      );
+      debugPrint('CHAT: discovering services...');
+      final services = await widget.device.discoverServices();
 
-      final services =
-      await widget.device
-          .discoverServices();
-
-      for (final service
-      in services) {
-        for (final characteristic
-        in service.characteristics) {
-          if (characteristic.uuid ==
-              txUuid) {
-            txCharacteristic =
-                characteristic;
-
+      for (final service in services) {
+        for (final characteristic in service.characteristics) {
+          if (characteristic.uuid == txUuid) {
+            txCharacteristic = characteristic;
             break;
           }
         }
       }
 
       if (txCharacteristic == null) {
-        debugPrint(
-          'CHAT: TX characteristic not found',
-        );
-
+        debugPrint('CHAT: TX characteristic not found');
         return;
       }
 
-      await notificationSubscription
-          ?.cancel();
-
-      notificationSubscription =
-          txCharacteristic!
-              .onValueReceived
-              .listen(
-            handleIncomingBleData,
-            onError: (error) {
-              debugPrint(
-                'Notification error: $error',
-              );
-            },
-            cancelOnError: false,
-          );
-
-      debugPrint(
-        'CHAT: notification listener created',
+      await notificationSubscription?.cancel();
+      notificationSubscription = txCharacteristic!.onValueReceived.listen(
+        handleIncomingBleData,
+        onError: (error) {
+          debugPrint('Notification error: $error');
+        },
+        cancelOnError: false,
       );
 
-      await txCharacteristic!
-          .setNotifyValue(true);
-
-      debugPrint(
-        'CHAT: notifications ENABLED',
-      );
+      await txCharacteristic!.setNotifyValue(true);
+      debugPrint('CHAT: notifications ENABLED');
     } catch (e, stackTrace) {
-      debugPrint(
-        'CHAT notification setup error: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint('CHAT notification setup error: $e');
+      debugPrint(stackTrace.toString());
     }
   }
 
-  void handleIncomingBleData(
-      List<int> value,
-      ) {
+  void handleIncomingBleData(List<int> value) {
     if (value.isEmpty) return;
 
-    final message = utf8.decode(
-      value,
-      allowMalformed: true,
-    ).trim();
+    // Voice packets are binary. Check them before attempting UTF-8 decoding.
+    final voicePacket = VoicePacket.decode(value);
+    if (voicePacket != null) {
+      _handleIncomingVoicePacket(voicePacket);
+      return;
+    }
 
+    final message = utf8.decode(value, allowMalformed: true).trim();
     if (message.isEmpty) return;
 
-    debugPrint(
-      '================================',
-    );
+    debugPrint('CHAT BLE DATA RECEIVED: $message');
 
-    debugPrint(
-      'CHAT BLE DATA RECEIVED',
-    );
-
-    debugPrint(
-      'DATA: $message',
-    );
-
-    debugPrint(
-      '================================',
-    );
-
-    final locationPacket =
-    LocationPacket.parse(
-      message,
-    );
-
+    final locationPacket = LocationPacket.parse(message);
     if (locationPacket != null) {
-      debugPrint(
-        'CHAT: Location packet ignored here.',
-      );
-
+      debugPrint('CHAT: Location packet ignored here.');
       return;
     }
 
     if (!mounted) return;
-
     setState(() {
       messages.add(
         ChatMessage(
@@ -3047,48 +3153,75 @@ class _ChatPageState
         ),
       );
     });
-
     scrollChatToBottom();
   }
 
-  Future<void> sendChatMessage(
-      String message,
-      ) async {
-    message = message.trim();
+  void _handleIncomingVoicePacket(VoicePacket packet) async {
+    final existing = _incomingVoiceMessages[packet.messageId];
+    final transfer = existing ?? _IncomingVoiceMessage(packet.totalChunks);
 
-    if (message.isEmpty) return;
+    if (transfer.totalChunks != packet.totalChunks) {
+      debugPrint('VOICE: total chunk mismatch for ${packet.messageId}');
+      _incomingVoiceMessages.remove(packet.messageId);
+      return;
+    }
 
-    if (!isConnected) return;
+    transfer.chunks[packet.chunkIndex] = packet.payload;
+    _incomingVoiceMessages[packet.messageId] = transfer;
 
-    if (isSending) return;
+    debugPrint(
+      'VOICE RX: message=${packet.messageId} '
+          'chunk=${packet.chunkIndex + 1}/${packet.totalChunks}',
+    );
 
-    setState(() {
-      isSending = true;
-    });
+    if (!transfer.complete) return;
 
     try {
-      await widget.rxCharacteristic
-          .write(
+      final bytes = transfer.assemble();
+      final directory = await getApplicationDocumentsDirectory();
+      final voiceDirectory = Directory('${directory.path}/voice_messages');
+      await voiceDirectory.create(recursive: true);
+
+      final file = File(
+        '${voiceDirectory.path}/voice_${packet.messageId}.m4a',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+
+      _incomingVoiceMessages.remove(packet.messageId);
+
+      if (!mounted) return;
+      setState(() {
+        messages.add(
+          ChatMessage(
+            text: 'Voice message',
+            fromMe: false,
+            time: DateTime.now(),
+            type: ChatMessageType.voice,
+            audioPath: file.path,
+          ),
+        );
+      });
+      scrollChatToBottom();
+      debugPrint('VOICE RX COMPLETE: ${file.path}');
+    } catch (e) {
+      debugPrint('VOICE RX REASSEMBLY ERROR: $e');
+      _incomingVoiceMessages.remove(packet.messageId);
+    }
+  }
+
+  Future<void> sendChatMessage(String message) async {
+    message = message.trim();
+    if (message.isEmpty || !isConnected || isSending || isVoiceSending) return;
+
+    setState(() => isSending = true);
+
+    try {
+      await widget.rxCharacteristic.write(
         utf8.encode(message),
         withoutResponse: false,
       );
 
-      debugPrint(
-        '================================',
-      );
-
-      debugPrint(
-        'MESSAGE SENT TO ESP32',
-      );
-
-      debugPrint(message);
-
-      debugPrint(
-        '================================',
-      );
-
       if (!mounted) return;
-
       setState(() {
         messages.add(
           ChatMessage(
@@ -3097,124 +3230,329 @@ class _ChatPageState
             time: DateTime.now(),
           ),
         );
-
         messageController.clear();
-
         isSending = false;
       });
-
       scrollChatToBottom();
     } catch (e) {
-      debugPrint(
-        'SEND ERROR: $e',
-      );
-
+      debugPrint('SEND ERROR: $e');
       if (!mounted) return;
-
-      setState(() {
-        isSending = false;
-      });
-
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Failed to send message',
-          ),
-        ),
+      setState(() => isSending = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send message')),
       );
     }
   }
 
-  Future<void>
-  disconnectFromChat() async {
-    await notificationSubscription
-        ?.cancel();
+  Future<void> startVoiceRecording() async {
+    if (!isConnected || isSending || isVoiceSending || isRecording) return;
 
+    try {
+      final hasPermission = await _recorder.hasPermission();
+      if (!hasPermission) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Microphone permission is required')),
+        );
+        return;
+      }
+
+      final directory = await getApplicationDocumentsDirectory();
+      final voiceDirectory = Directory('${directory.path}/voice_messages');
+      await voiceDirectory.create(recursive: true);
+
+      final id = DateTime.now().microsecondsSinceEpoch;
+      final path = '${voiceDirectory.path}/recording_$id.m4a';
+
+      final config = RecordConfig(
+        encoder: AudioEncoder.aacLc,
+        bitRate: voiceBitRate,
+        sampleRate: voiceSampleRate,
+        numChannels: 1,
+      );
+
+      await _recorder.start(config, path: path);
+
+      if (!mounted) return;
+      setState(() {
+        isRecording = true;
+        recordingSeconds = 0;
+        recordingPath = path;
+      });
+
+      recordingTimer?.cancel();
+      recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
+        if (!mounted || !isRecording) return;
+        setState(() => recordingSeconds++);
+        if (recordingSeconds >= maxVoiceSeconds) {
+          await stopVoiceRecordingAndSend();
+        }
+      });
+    } catch (e, stackTrace) {
+      debugPrint('VOICE RECORD START ERROR: $e');
+      debugPrint(stackTrace.toString());
+      recordingTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          isRecording = false;
+          recordingSeconds = 0;
+          recordingPath = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not start recording: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> cancelVoiceRecording() async {
+    if (!isRecording) return;
+    recordingTimer?.cancel();
+    recordingTimer = null;
+
+    final path = recordingPath;
+    try {
+      await _recorder.cancel();
+      if (path != null) {
+        final file = File(path);
+        if (await file.exists()) await file.delete();
+      }
+    } catch (e) {
+      debugPrint('VOICE CANCEL ERROR: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      isRecording = false;
+      recordingSeconds = 0;
+      recordingPath = null;
+    });
+  }
+
+  Future<void> stopVoiceRecordingAndSend() async {
+    if (!isRecording) return;
+
+    recordingTimer?.cancel();
+    recordingTimer = null;
+
+    final path = recordingPath;
+
+    if (mounted) {
+      setState(() => isRecording = false);
+    }
+
+    try {
+      final recordedPath = await _recorder.stop();
+      final finalPath = recordedPath ?? path;
+
+      if (finalPath == null) {
+        throw Exception('Recorder did not return an audio file');
+      }
+
+      final file = File(finalPath);
+      if (!await file.exists()) {
+        throw Exception('Recorded audio file does not exist');
+      }
+
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) {
+        throw Exception('Recorded audio file is empty');
+      }
+
+      debugPrint('VOICE: compressed file size = ${bytes.length} bytes');
+      await _sendVoiceBytes(bytes);
+    } catch (e, stackTrace) {
+      debugPrint('VOICE RECORD/ SEND ERROR: $e');
+      debugPrint(stackTrace.toString());
+      if (mounted) {
+        setState(() {
+          isVoiceSending = false;
+          recordingSeconds = 0;
+          recordingPath = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Voice message failed: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _sendVoiceBytes(List<int> audioBytes) async {
+    if (!isConnected) return;
+
+    setState(() {
+      isVoiceSending = true;
+      recordingSeconds = 0;
+    });
+
+    final messageId = Random.secure().nextInt(0x7FFFFFFF);
+    final totalChunks = (audioBytes.length + VoicePacket.maxPayload - 1) ~/
+        VoicePacket.maxPayload;
+
+    debugPrint(
+      'VOICE TX START: id=$messageId size=${audioBytes.length} '
+          'chunks=$totalChunks',
+    );
+
+    try {
+      for (var index = 0; index < totalChunks; index++) {
+        final start = index * VoicePacket.maxPayload;
+        final end = min(start + VoicePacket.maxPayload, audioBytes.length);
+        final payload = audioBytes.sublist(start, end);
+
+        var flags = 0;
+        if (index == 0) flags |= 0x01;
+        if (index == totalChunks - 1) flags |= 0x02;
+
+        final packet = VoicePacket(
+          messageId: messageId,
+          chunkIndex: index,
+          totalChunks: totalChunks,
+          flags: flags,
+          payload: payload,
+        );
+
+        final encoded = packet.encode();
+        debugPrint(
+          'VOICE TX: ${index + 1}/$totalChunks '
+              'bytes=${encoded.length}',
+        );
+
+        // ESP32 must forward these bytes unchanged. It does not decode them.
+        await widget.rxCharacteristic.write(
+          encoded,
+          withoutResponse: false,
+        );
+
+        if (interPacketDelayMs > 0) {
+          await Future.delayed(
+            const Duration(milliseconds: interPacketDelayMs),
+          );
+        }
+      }
+
+      final directory = await getApplicationDocumentsDirectory();
+      final voiceDirectory = Directory('${directory.path}/voice_messages');
+      await voiceDirectory.create(recursive: true);
+      final localCopy = File(
+        '${voiceDirectory.path}/sent_$messageId.m4a',
+      );
+      await localCopy.writeAsBytes(audioBytes, flush: true);
+
+      if (!mounted) return;
+      setState(() {
+        messages.add(
+          ChatMessage(
+            text: 'Voice message',
+            fromMe: true,
+            time: DateTime.now(),
+            type: ChatMessageType.voice,
+            audioPath: localCopy.path,
+          ),
+        );
+        isVoiceSending = false;
+        recordingSeconds = 0;
+        recordingPath = null;
+      });
+      scrollChatToBottom();
+      debugPrint('VOICE TX COMPLETE: id=$messageId');
+    } catch (e, stackTrace) {
+      debugPrint('VOICE TX ERROR: $e');
+      debugPrint(stackTrace.toString());
+      if (mounted) {
+        setState(() {
+          isVoiceSending = false;
+          recordingSeconds = 0;
+          recordingPath = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send voice message: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> playVoice(ChatMessage message) async {
+    final path = message.audioPath;
+    if (path == null) return;
+
+    try {
+      final player = _players.putIfAbsent(message.time.microsecondsSinceEpoch, () {
+        return AudioPlayer();
+      });
+      await player.play(DeviceFileSource(path));
+    } catch (e) {
+      debugPrint('VOICE PLAY ERROR: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not play voice message')),
+        );
+      }
+    }
+  }
+
+  Future<void> disconnectFromChat() async {
+    await notificationSubscription?.cancel();
     notificationSubscription = null;
+    recordingTimer?.cancel();
+
+    if (isRecording) {
+      try {
+        await _recorder.cancel();
+      } catch (_) {}
+    }
 
     try {
       await widget.device.disconnect();
     } catch (e) {
-      debugPrint(
-        'Disconnect error: $e',
-      );
+      debugPrint('Disconnect error: $e');
     }
 
     if (!mounted) return;
-
-    setState(() {
-      isConnected = false;
-    });
-
+    setState(() => isConnected = false);
     Navigator.of(context).pop();
   }
 
   void scrollChatToBottom() {
-    WidgetsBinding.instance
-        .addPostFrameCallback(
-          (_) {
-        if (!chatScrollController
-            .hasClients) {
-          return;
-        }
-
-        chatScrollController
-            .animateTo(
-          chatScrollController
-              .position
-              .maxScrollExtent,
-          duration:
-          const Duration(
-            milliseconds: 220,
-          ),
-          curve: Curves.easeOut,
-        );
-      },
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!chatScrollController.hasClients) return;
+      chatScrollController.animateTo(
+        chatScrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
-  String formatTime(
-      DateTime time,
-      ) {
-    final hour = time.hour
-        .toString()
-        .padLeft(2, '0');
-
-    final minute = time.minute
-        .toString()
-        .padLeft(2, '0');
-
+  String formatTime(DateTime time) {
+    final hour = time.hour.toString().padLeft(2, '0');
+    final minute = time.minute.toString().padLeft(2, '0');
     return '$hour:$minute';
   }
 
   @override
   void dispose() {
-    notificationSubscription
-        ?.cancel();
-
+    recordingTimer?.cancel();
+    notificationSubscription?.cancel();
     messageController.dispose();
-
-    chatScrollController
-        .dispose();
-
+    chatScrollController.dispose();
+    _recorder.dispose();
+    for (final player in _players.values) {
+      player.dispose();
+    }
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final canType = isConnected && !isSending && !isVoiceSending && !isRecording;
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           tooltip: 'Back',
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-          ),
-          onPressed: () {
-            Navigator.of(context)
-                .pop();
-          },
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.of(context).pop(),
         ),
         titleSpacing: 0,
         title: Row(
@@ -3223,48 +3561,29 @@ class _ChatPageState
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color:
-                const Color(
-                  0xFFEFF4FC,
-                ),
-                borderRadius:
-                BorderRadius
-                    .circular(
-                  10,
-                ),
+                color: const Color(0xFFEFF4FC),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(
                 Icons.developer_board,
                 size: 19,
-                color:
-                Color(
-                  0xFF1769E0,
-                ),
+                color: Color(0xFF1769E0),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
-                crossAxisAlignment:
-                CrossAxisAlignment
-                    .start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    widget.device
-                        .platformName
-                        .isNotEmpty
-                        ? widget.device
-                        .platformName
+                    widget.device.platformName.isNotEmpty
+                        ? widget.device.platformName
                         : 'ESP32 Device',
                     maxLines: 1,
-                    overflow:
-                    TextOverflow
-                        .ellipsis,
-                    style:
-                    const TextStyle(
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
                       fontSize: 15,
-                      fontWeight:
-                      FontWeight.w700,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   Row(
@@ -3272,27 +3591,17 @@ class _ChatPageState
                       Container(
                         width: 6,
                         height: 6,
-                        decoration:
-                        const BoxDecoration(
-                          shape:
-                          BoxShape
-                              .circle,
-                          color:
-                          Colors.green,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.green,
                         ),
                       ),
-                      const SizedBox(
-                        width: 5,
-                      ),
+                      const SizedBox(width: 5),
                       const Text(
                         'Connected',
-                        style:
-                        TextStyle(
+                        style: TextStyle(
                           fontSize: 10,
-                          color:
-                          Color(
-                            0xFF6D7787,
-                          ),
+                          color: Color(0xFF6D7787),
                         ),
                       ),
                     ],
@@ -3307,252 +3616,232 @@ class _ChatPageState
         children: [
           Container(
             width: double.infinity,
-            padding:
-            const EdgeInsets
-                .symmetric(
-              horizontal: 16,
-              vertical: 9,
-            ),
-            decoration:
-            const BoxDecoration(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+            decoration: const BoxDecoration(
               color: Colors.white,
               border: Border(
-                bottom:
-                BorderSide(
-                  color:
-                  Color(
-                    0xFFE8ECF1,
-                  ),
-                ),
+                bottom: BorderSide(color: Color(0xFFE8ECF1)),
               ),
             ),
             child: Text(
-              widget.device
-                  .remoteId
-                  .toString(),
-              style:
-              const TextStyle(
+              widget.device.remoteId.toString(),
+              style: const TextStyle(
                 fontSize: 10,
-                color:
-                Color(
-                  0xFF8993A2,
-                ),
+                color: Color(0xFF8993A2),
               ),
             ),
           ),
+          if (isVoiceSending)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              color: const Color(0xFFEFF4FC),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'Sending voice message...',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1769E0),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           Expanded(
             child: messages.isEmpty
                 ? Center(
               child: Column(
-                mainAxisSize:
-                MainAxisSize
-                    .min,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: 58,
                     height: 58,
-                    decoration:
-                    BoxDecoration(
-                      color:
-                      const Color(
-                        0xFFEFF4FC,
-                      ),
-                      borderRadius:
-                      BorderRadius
-                          .circular(
-                        18,
-                      ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF4FC),
+                      borderRadius: BorderRadius.circular(18),
                     ),
-                    child:
-                    const Icon(
-                      Icons
-                          .chat_bubble_outline,
+                    child: const Icon(
+                      Icons.chat_bubble_outline,
                       size: 28,
-                      color:
-                      Color(
-                        0xFF1769E0,
-                      ),
+                      color: Color(0xFF1769E0),
                     ),
                   ),
-                  const SizedBox(
-                    height: 12,
-                  ),
+                  const SizedBox(height: 12),
                   const Text(
                     'No messages yet',
-                    style:
-                    TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
-                      fontWeight:
-                      FontWeight
-                          .w600,
-                      color:
-                      Color(
-                        0xFF697487,
-                      ),
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF697487),
                     ),
                   ),
-                  const SizedBox(
-                    height: 4,
-                  ),
+                  const SizedBox(height: 4),
                   const Text(
-                    'Send a message to the ESP32',
-                    style:
-                    TextStyle(
+                    'Send a text or voice message',
+                    style: TextStyle(
                       fontSize: 11,
-                      color:
-                      Color(
-                        0xFF9AA3B1,
-                      ),
+                      color: Color(0xFF9AA3B1),
                     ),
                   ),
                 ],
               ),
             )
                 : ListView.builder(
-              controller:
-              chatScrollController,
-              padding:
-              const EdgeInsets
-                  .fromLTRB(
-                12,
-                14,
-                12,
-                12,
-              ),
-              itemCount:
-              messages.length,
-              itemBuilder:
-                  (context, index) {
-                final message =
-                messages[index];
-
+              controller: chatScrollController,
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+              itemCount: messages.length,
+              itemBuilder: (context, index) {
+                final message = messages[index];
                 return _ChatBubble(
-                  message:
-                  message,
-                  time:
-                  formatTime(
-                    message.time,
-                  ),
+                  message: message,
+                  time: formatTime(message.time),
+                  onPlay: message.isVoice
+                      ? () => playVoice(message)
+                      : null,
                 );
               },
             ),
           ),
           SafeArea(
             child: Container(
-              padding:
-              const EdgeInsets
-                  .fromLTRB(
-                10,
-                8,
-                10,
-                8,
-              ),
-              decoration:
-              const BoxDecoration(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+              decoration: const BoxDecoration(
                 color: Colors.white,
                 border: Border(
-                  top: BorderSide(
-                    color:
-                    Color(
-                      0xFFE8ECF1,
-                    ),
-                  ),
+                  top: BorderSide(color: Color(0xFFE8ECF1)),
                 ),
               ),
-              child: Row(
-                crossAxisAlignment:
-                CrossAxisAlignment
-                    .end,
+              child: isRecording
+                  ? Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Cancel',
+                    onPressed: cancelVoiceRecording,
+                    icon: const Icon(Icons.delete_outline_rounded),
+                  ),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF1F1),
+                        borderRadius: BorderRadius.circular(13),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.mic_rounded,
+                            color: Color(0xFFE53935),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Recording 0:0${recordingSeconds.clamp(0, 9)} / 0:05',
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFFC62828),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: stopVoiceRecordingAndSend,
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        backgroundColor: const Color(0xFFE53935),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: const Icon(Icons.send_rounded, size: 21),
+                    ),
+                  ),
+                ],
+              )
+                  : Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Expanded(
                     child: TextField(
-                      controller:
-                      messageController,
-                      enabled:
-                      isConnected &&
-                          !isSending,
+                      controller: messageController,
+                      enabled: canType,
                       minLines: 1,
                       maxLines: 4,
-                      textInputAction:
-                      TextInputAction
-                          .newline,
-                      decoration:
-                      const InputDecoration(
-                        hintText:
-                        'Type a message...',
-                        hintStyle:
-                        TextStyle(
+                      textInputAction: TextInputAction.newline,
+                      decoration: const InputDecoration(
+                        hintText: 'Type a message...',
+                        hintStyle: TextStyle(
                           fontSize: 13,
-                          color:
-                          Color(
-                            0xFF9AA3B1,
-                          ),
+                          color: Color(0xFF9AA3B1),
                         ),
-                        contentPadding:
-                        EdgeInsets
-                            .symmetric(
+                        contentPadding: EdgeInsets.symmetric(
                           horizontal: 15,
                           vertical: 11,
                         ),
                       ),
-                      onSubmitted:
-                          (value) {
-                        sendChatMessage(
-                          value,
-                        );
-                      },
+                      onSubmitted: sendChatMessage,
                     ),
                   ),
-                  const SizedBox(
-                    width: 7,
-                  ),
+                  const SizedBox(width: 7),
                   SizedBox(
                     width: 45,
                     height: 45,
-                    child:
-                    FilledButton(
-                      onPressed:
-                      isConnected &&
-                          !isSending
-                          ? () {
-                        sendChatMessage(
-                          messageController
-                              .text,
-                        );
-                      }
+                    child: OutlinedButton(
+                      onPressed: canType ? startVoiceRecording : null,
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        side: const BorderSide(color: Color(0xFFD7DEE8)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
+                        ),
+                      ),
+                      child: const Icon(Icons.mic_none_rounded, size: 21),
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  SizedBox(
+                    width: 45,
+                    height: 45,
+                    child: FilledButton(
+                      onPressed: canType
+                          ? () => sendChatMessage(messageController.text)
                           : null,
-                      style:
-                      FilledButton
-                          .styleFrom(
-                        padding:
-                        EdgeInsets.zero,
-                        shape:
-                        RoundedRectangleBorder(
-                          borderRadius:
-                          BorderRadius
-                              .circular(
-                            13,
-                          ),
+                      style: FilledButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(13),
                         ),
                       ),
                       child: isSending
                           ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child:
-                        CircularProgressIndicator(
-                          strokeWidth:
-                          2,
-                          color:
-                          Colors
-                              .white,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
                         ),
                       )
-                          : const Icon(
-                        Icons
-                            .send_rounded,
-                        size: 20,
-                      ),
+                          : const Icon(Icons.send_rounded, size: 20),
                     ),
                   ),
                 ],
@@ -3569,70 +3858,101 @@ class _ChatPageState
 // CHAT BUBBLE
 // ============================================================
 
-class _ChatBubble
-    extends StatelessWidget {
+class _ChatBubble extends StatelessWidget {
   final ChatMessage message;
   final String time;
+  final VoidCallback? onPlay;
 
   const _ChatBubble({
     required this.message,
     required this.time,
+    this.onPlay,
   });
 
   @override
   Widget build(BuildContext context) {
     return Align(
-      alignment:
-      message.fromMe
-          ? Alignment.centerRight
-          : Alignment.centerLeft,
+      alignment: message.fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        constraints:
-        BoxConstraints(
-          maxWidth:
-          MediaQuery.of(context)
-              .size
-              .width *
-              0.76,
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.76,
         ),
-        margin:
-        const EdgeInsets.only(
-          bottom: 8,
-        ),
-        padding:
-        const EdgeInsets.fromLTRB(
-          12,
-          9,
-          10,
-          7,
-        ),
-        decoration:
-        BoxDecoration(
-          color: message.fromMe
-              ? const Color(
-            0xFF1769E0,
-          )
-              : Colors.white,
-          borderRadius:
-          BorderRadius.circular(
-            14,
-          ),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(12, 9, 10, 7),
+        decoration: BoxDecoration(
+          color: message.fromMe ? const Color(0xFF1769E0) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
           border: message.fromMe
               ? null
-              : Border.all(
-            color:
-            const Color(
-              0xFFE3E8EF,
-            ),
-          ),
+              : Border.all(color: const Color(0xFFE3E8EF)),
         ),
-        child: Column(
-          crossAxisAlignment:
-          CrossAxisAlignment.end,
+        child: message.isVoice
+            ? Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: message.fromMe
+                  ? Colors.white.withOpacity(0.16)
+                  : const Color(0xFFEFF4FC),
+              shape: const CircleBorder(),
+              child: InkWell(
+                customBorder: const CircleBorder(),
+                onTap: onPlay,
+                child: Padding(
+                  padding: const EdgeInsets.all(9),
+                  child: Icon(
+                    Icons.play_arrow_rounded,
+                    size: 24,
+                    color: message.fromMe
+                        ? Colors.white
+                        : const Color(0xFF1769E0),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Voice message',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: message.fromMe
+                        ? Colors.white
+                        : const Color(0xFF273142),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Tap to play',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: message.fromMe
+                        ? Colors.white70
+                        : const Color(0xFF929BA9),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(width: 10),
+            Text(
+              time,
+              style: TextStyle(
+                fontSize: 9,
+                color: message.fromMe
+                    ? Colors.white70
+                    : const Color(0xFF929BA9),
+              ),
+            ),
+          ],
+        )
+            : Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Align(
-              alignment:
-              Alignment.centerLeft,
+              alignment: Alignment.centerLeft,
               child: Text(
                 message.text,
                 style: TextStyle(
@@ -3640,24 +3960,18 @@ class _ChatBubble
                   height: 1.35,
                   color: message.fromMe
                       ? Colors.white
-                      : const Color(
-                    0xFF273142,
-                  ),
+                      : const Color(0xFF273142),
                 ),
               ),
             ),
-            const SizedBox(
-              height: 3,
-            ),
+            const SizedBox(height: 3),
             Text(
               time,
               style: TextStyle(
                 fontSize: 9,
                 color: message.fromMe
                     ? Colors.white70
-                    : const Color(
-                  0xFF929BA9,
-                ),
+                    : const Color(0xFF929BA9),
               ),
             ),
           ],
@@ -3666,3 +3980,4 @@ class _ChatBubble
     );
   }
 }
+
