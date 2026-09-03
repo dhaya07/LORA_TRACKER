@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -552,285 +551,6 @@ class _SplashLandscapePainter extends CustomPainter {
   }
 }
 
-// ============================================================
-// LOCATION PACKET MODEL
-// ============================================================
-
-class LocationPacket {
-  final String deviceId;
-  final double latitude;
-  final double longitude;
-  final String timestamp;
-  final int battery;
-
-  const LocationPacket({
-    required this.deviceId,
-    required this.latitude,
-    required this.longitude,
-    required this.timestamp,
-    required this.battery,
-  });
-
-  static LocationPacket? parse(String data) {
-    try {
-      final parts = data.trim().split(',');
-
-      if (parts.length != 6) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: wrong field count',
-        );
-        return null;
-      }
-
-      if (parts[0].trim().toUpperCase() != 'LOC') {
-        return null;
-      }
-
-      final deviceId = parts[1].trim();
-
-      if (deviceId.isEmpty) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: empty device ID',
-        );
-        return null;
-      }
-
-      final latitude = double.tryParse(
-        parts[2].trim(),
-      );
-
-      final longitude = double.tryParse(
-        parts[3].trim(),
-      );
-
-      final timestamp = parts[4].trim();
-
-      final battery = int.tryParse(
-        parts[5].trim(),
-      );
-
-      if (latitude == null ||
-          longitude == null ||
-          battery == null) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: invalid data',
-        );
-        return null;
-      }
-
-      if (latitude < -90 || latitude > 90) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: invalid latitude',
-        );
-        return null;
-      }
-
-      if (longitude < -180 || longitude > 180) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: invalid longitude',
-        );
-        return null;
-      }
-
-      if (battery < 0 || battery > 100) {
-        debugPrint(
-          'LOCATION PACKET REJECTED: invalid battery',
-        );
-        return null;
-      }
-
-      return LocationPacket(
-        deviceId: deviceId,
-        latitude: latitude,
-        longitude: longitude,
-        timestamp: timestamp,
-        battery: battery,
-      );
-    } catch (e) {
-      debugPrint(
-        'LOCATION PACKET PARSE ERROR: $e',
-      );
-
-      return null;
-    }
-  }
-}
-
-// ============================================================
-// MESSAGE MODEL
-// ============================================================
-
-enum ChatMessageType { text, voice }
-
-class ChatMessage {
-  final String text;
-  final bool fromMe;
-  final DateTime time;
-  final ChatMessageType type;
-  final String? audioPath;
-  final Duration? audioDuration;
-
-  const ChatMessage({
-    required this.text,
-    required this.fromMe,
-    required this.time,
-    this.type = ChatMessageType.text,
-    this.audioPath,
-    this.audioDuration,
-  });
-
-  bool get isVoice => type == ChatMessageType.voice;
-}
-
-// ============================================================
-// VOICE PACKET PROTOCOL
-// ============================================================
-// The phone does ALL audio work. ESP32 only forwards these bytes
-// between BLE and LoRa.
-//
-// Frame:
-// VOIC | version | messageId | chunk | total | flags | length | payload | CRC16
-//   4        1          4          2       2       1       2        N        2
-//
-// Payload is compressed AAC-LC/M4A data.
-
-class VoicePacket {
-  static const List<int> magic = [0x56, 0x4F, 0x49, 0x43]; // VOIC
-  static const int version = 1;
-  static const int headerSize = 16;
-  static const int crcSize = 2;
-  static const int maxPayload = 80;
-
-  final int messageId;
-  final int chunkIndex;
-  final int totalChunks;
-  final int flags;
-  final List<int> payload;
-
-  const VoicePacket({
-    required this.messageId,
-    required this.chunkIndex,
-    required this.totalChunks,
-    required this.flags,
-    required this.payload,
-  });
-
-  bool get isStart => (flags & 0x01) != 0;
-  bool get isEnd => (flags & 0x02) != 0;
-
-  List<int> encode() {
-    final bytes = <int>[];
-    bytes.addAll(magic);
-    bytes.add(version);
-    _writeUint32(bytes, messageId);
-    _writeUint16(bytes, chunkIndex);
-    _writeUint16(bytes, totalChunks);
-    bytes.add(flags & 0xFF);
-    _writeUint16(bytes, payload.length);
-    bytes.addAll(payload);
-
-    final crc = crc16(bytes);
-    _writeUint16(bytes, crc);
-    return bytes;
-  }
-
-  static VoicePacket? decode(List<int> bytes) {
-    try {
-      if (bytes.length < headerSize + crcSize) return null;
-      for (var i = 0; i < magic.length; i++) {
-        if (bytes[i] != magic[i]) return null;
-      }
-      if (bytes[4] != version) return null;
-
-      final messageId = _readUint32(bytes, 5);
-      final chunkIndex = _readUint16(bytes, 9);
-      final totalChunks = _readUint16(bytes, 11);
-      final flags = bytes[13];
-      final payloadLength = _readUint16(bytes, 14);
-
-      final expectedLength = headerSize + payloadLength + crcSize;
-      if (bytes.length != expectedLength) return null;
-      if (totalChunks == 0 || chunkIndex >= totalChunks) return null;
-
-      final payloadStart = headerSize;
-      final payloadEnd = payloadStart + payloadLength;
-      final receivedCrc = _readUint16(bytes, payloadEnd);
-      final calculatedCrc = crc16(bytes.sublist(0, payloadEnd));
-      if (receivedCrc != calculatedCrc) {
-        debugPrint('VOICE: CRC error on chunk $chunkIndex');
-        return null;
-      }
-
-      return VoicePacket(
-        messageId: messageId,
-        chunkIndex: chunkIndex,
-        totalChunks: totalChunks,
-        flags: flags,
-        payload: List<int>.from(bytes.sublist(payloadStart, payloadEnd)),
-      );
-    } catch (e) {
-      debugPrint('VOICE: packet decode error: $e');
-      return null;
-    }
-  }
-
-  static void _writeUint16(List<int> out, int value) {
-    out.add((value >> 8) & 0xFF);
-    out.add(value & 0xFF);
-  }
-
-  static void _writeUint32(List<int> out, int value) {
-    out.add((value >> 24) & 0xFF);
-    out.add((value >> 16) & 0xFF);
-    out.add((value >> 8) & 0xFF);
-    out.add(value & 0xFF);
-  }
-
-  static int _readUint16(List<int> data, int offset) =>
-      (data[offset] << 8) | data[offset + 1];
-
-  static int _readUint32(List<int> data, int offset) =>
-      (data[offset] << 24) |
-      (data[offset + 1] << 16) |
-      (data[offset + 2] << 8) |
-      data[offset + 3];
-
-  static int crc16(List<int> data) {
-    var crc = 0xFFFF;
-    for (final byte in data) {
-      crc ^= byte;
-      for (var i = 0; i < 8; i++) {
-        if ((crc & 1) != 0) {
-          crc = (crc >> 1) ^ 0xA001;
-        } else {
-          crc >>= 1;
-        }
-      }
-    }
-    return crc & 0xFFFF;
-  }
-}
-
-class _IncomingVoiceMessage {
-  final int totalChunks;
-  final Map<int, List<int>> chunks = {};
-
-  _IncomingVoiceMessage(this.totalChunks);
-
-  bool get complete => chunks.length == totalChunks;
-
-  List<int> assemble() {
-    final output = <int>[];
-    for (var i = 0; i < totalChunks; i++) {
-      final chunk = chunks[i];
-      if (chunk == null) {
-        throw StateError('Missing voice chunk $i');
-      }
-      output.addAll(chunk);
-    }
-    return output;
-  }
-}
 
 // ============================================================
 // OFFLINE VECTOR MAP STYLE
@@ -1204,6 +924,343 @@ class OfflineMapManager {
   }
 }
 
+
+// ============================================================
+// DATA MODELS
+// ============================================================
+
+enum ChatScope { privateChat, commonChat }
+
+enum ChatMessageType { text, voice }
+
+class NodeInfo {
+  final String id;
+  final double latitude;
+  final double longitude;
+  final int battery;
+  final DateTime lastSeen;
+  int? rssi;
+
+  NodeInfo({
+    required this.id,
+    required this.latitude,
+    required this.longitude,
+    required this.battery,
+    required this.lastSeen,
+    this.rssi,
+  });
+}
+
+class ChatMessage {
+  final String id;
+  final String senderId;
+  final String? recipientId;
+  final String text;
+  final bool fromMe;
+  final DateTime time;
+  final ChatMessageType type;
+  final String? audioPath;
+
+  const ChatMessage({
+    required this.id,
+    required this.senderId,
+    this.recipientId,
+    required this.text,
+    required this.fromMe,
+    required this.time,
+    this.type = ChatMessageType.text,
+    this.audioPath,
+  });
+
+  bool get isVoice => type == ChatMessageType.voice;
+}
+
+// ------------------------------------------------------------
+// ChatNotifier
+// ------------------------------------------------------------
+// A tiny observable message list. Each open conversation (common
+// chat or a specific private chat) has one of these. Incoming BLE
+// data mutates the notifier directly, and whichever chat page is
+// currently on screen is listening to it -- so the message shows up
+// immediately, instead of waiting for the underlying DevicePage
+// (which is buried under the pushed chat route and does not get
+// rebuilt just because it called setState) to eventually redraw.
+// ------------------------------------------------------------
+class ChatNotifier extends ChangeNotifier {
+  final List<ChatMessage> messages = [];
+
+  void add(ChatMessage message) {
+    messages.add(message);
+    notifyListeners();
+  }
+}
+
+class AppNotification {
+  final String id;
+  final String senderId;
+  final String preview;
+  final DateTime time;
+  final bool isPrivate;
+  bool read;
+
+  AppNotification({
+    required this.id,
+    required this.senderId,
+    required this.preview,
+    required this.time,
+    required this.isPrivate,
+    this.read = false,
+  });
+}
+
+// Existing location packet format is intentionally retained.
+class LocationPacket {
+  final String deviceId;
+  final double latitude;
+  final double longitude;
+  final String timestamp;
+  final int battery;
+
+  const LocationPacket({
+    required this.deviceId,
+    required this.latitude,
+    required this.longitude,
+    required this.timestamp,
+    required this.battery,
+  });
+
+  static LocationPacket? parse(String data) {
+    try {
+      final parts = data.trim().split(',');
+      if (parts.length != 6) return null;
+      if (parts[0].trim().toUpperCase() != 'LOC') return null;
+
+      final id = parts[1].trim();
+      final lat = double.tryParse(parts[2].trim());
+      final lon = double.tryParse(parts[3].trim());
+      final timestamp = parts[4].trim();
+      final battery = int.tryParse(parts[5].trim());
+
+      if (id.isEmpty || lat == null || lon == null || battery == null) {
+        return null;
+      }
+      if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
+      if (battery < 0 || battery > 100) return null;
+
+      return LocationPacket(
+        deviceId: id,
+        latitude: lat,
+        longitude: lon,
+        timestamp: timestamp,
+        battery: battery,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+// ============================================================
+// VOICE PACKET PROTOCOL
+// ============================================================
+// Kept compatible with the user's existing phone-side voice framing.
+// ESP32 can later be updated to add routing metadata around this frame.
+
+class VoicePacket {
+  static const List<int> magic = [0x56, 0x4F, 0x49, 0x43]; // VOIC
+  static const int version = 1;
+  static const int headerSize = 16;
+  static const int crcSize = 2;
+  static const int maxPayload = 80;
+
+  final int messageId;
+  final int chunkIndex;
+  final int totalChunks;
+  final int flags;
+  final List<int> payload;
+
+  const VoicePacket({
+    required this.messageId,
+    required this.chunkIndex,
+    required this.totalChunks,
+    required this.flags,
+    required this.payload,
+  });
+
+  List<int> encode() {
+    final bytes = <int>[];
+    bytes.addAll(magic);
+    bytes.add(version);
+    _writeUint32(bytes, messageId);
+    _writeUint16(bytes, chunkIndex);
+    _writeUint16(bytes, totalChunks);
+    bytes.add(flags & 0xFF);
+    _writeUint16(bytes, payload.length);
+    bytes.addAll(payload);
+    _writeUint16(bytes, crc16(bytes));
+    return bytes;
+  }
+
+  static VoicePacket? decode(List<int> bytes) {
+    try {
+      if (bytes.length < headerSize + crcSize) return null;
+      for (var i = 0; i < magic.length; i++) {
+        if (bytes[i] != magic[i]) return null;
+      }
+      if (bytes[4] != version) return null;
+
+      final messageId = _readUint32(bytes, 5);
+      final chunkIndex = _readUint16(bytes, 9);
+      final totalChunks = _readUint16(bytes, 11);
+      final flags = bytes[13];
+      final payloadLength = _readUint16(bytes, 14);
+
+      final expectedLength = headerSize + payloadLength + crcSize;
+      if (bytes.length != expectedLength) return null;
+      if (totalChunks == 0 || chunkIndex >= totalChunks) return null;
+
+      final payloadEnd = headerSize + payloadLength;
+      final receivedCrc = _readUint16(bytes, payloadEnd);
+      final calculatedCrc = crc16(bytes.sublist(0, payloadEnd));
+      if (receivedCrc != calculatedCrc) return null;
+
+      return VoicePacket(
+        messageId: messageId,
+        chunkIndex: chunkIndex,
+        totalChunks: totalChunks,
+        flags: flags,
+        payload: List<int>.from(bytes.sublist(headerSize, payloadEnd)),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void _writeUint16(List<int> out, int value) {
+    out.add((value >> 8) & 0xFF);
+    out.add(value & 0xFF);
+  }
+
+  static void _writeUint32(List<int> out, int value) {
+    out.add((value >> 24) & 0xFF);
+    out.add((value >> 16) & 0xFF);
+    out.add((value >> 8) & 0xFF);
+    out.add(value & 0xFF);
+  }
+
+  static int _readUint16(List<int> data, int offset) =>
+      (data[offset] << 8) | data[offset + 1];
+
+  static int _readUint32(List<int> data, int offset) =>
+      (data[offset] << 24) |
+      (data[offset + 1] << 16) |
+      (data[offset + 2] << 8) |
+      data[offset + 3];
+
+  static int crc16(List<int> data) {
+    var crc = 0xFFFF;
+    for (final byte in data) {
+      crc ^= byte;
+      for (var i = 0; i < 8; i++) {
+        if ((crc & 1) != 0) {
+          crc = (crc >> 1) ^ 0xA001;
+        } else {
+          crc >>= 1;
+        }
+      }
+    }
+    return crc & 0xFFFF;
+  }
+}
+
+class _IncomingVoiceMessage {
+  final int totalChunks;
+  final Map<int, List<int>> chunks = {};
+
+  _IncomingVoiceMessage(this.totalChunks);
+
+  bool get complete => chunks.length == totalChunks;
+
+  List<int> assemble() {
+    final output = <int>[];
+    for (var i = 0; i < totalChunks; i++) {
+      final chunk = chunks[i];
+      if (chunk == null) throw StateError('Missing voice chunk $i');
+      output.addAll(chunk);
+    }
+    return output;
+  }
+}
+
+// ============================================================
+// COMMUNICATION ROUTING
+// ============================================================
+// This is the app-side routing layer.
+// IMPORTANT: until the ESP32 firmware is updated, the ESP32 will
+// still receive the current raw UART/BLE payload. The envelopes below
+// are therefore used by the new app architecture and are ready for
+// the later ESP32 routing implementation.
+
+class RoutingPacket {
+  static String privateText({
+    required String from,
+    required String to,
+    required String text,
+  }) {
+    return 'MSG,PRIVATE,$from,$to,${base64Encode(utf8.encode(text))}';
+  }
+
+  static String commonText({
+    required String from,
+    required String text,
+  }) {
+    return 'MSG,COMMON,$from,ALL,${base64Encode(utf8.encode(text))}';
+  }
+
+  static ParsedRoutingPacket? parse(String data) {
+    try {
+      final p = data.trim().split(',');
+      if (p.length < 5 || p[0].toUpperCase() != 'MSG') return null;
+
+      final scope = p[1].toUpperCase() == 'PRIVATE'
+          ? ChatScope.privateChat
+          : p[1].toUpperCase() == 'COMMON'
+          ? ChatScope.commonChat
+          : null;
+
+      if (scope == null) return null;
+
+      final from = p[2].trim();
+      final to = p[3].trim();
+      final encoded = p.sublist(4).join(',');
+      final decoded = utf8.decode(base64Decode(encoded), allowMalformed: true);
+
+      return ParsedRoutingPacket(
+        scope: scope,
+        from: from,
+        to: to,
+        text: decoded,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
+class ParsedRoutingPacket {
+  final ChatScope scope;
+  final String from;
+  final String to;
+  final String text;
+
+  const ParsedRoutingPacket({
+    required this.scope,
+    required this.from,
+    required this.to,
+    required this.text,
+  });
+}
+
 // ============================================================
 // DEVICE PAGE
 // ============================================================
@@ -1217,238 +1274,133 @@ class DevicePage extends StatefulWidget {
 
 class _DevicePageState extends State<DevicePage> {
   final List<ScanResult> scanResults = [];
+  final Map<String, NodeInfo> nodes = {};
 
-  final Map<String, LocationPacket> receivedLocations = {};
+  // Conversations are now observable notifiers instead of plain lists,
+  // so whichever chat page is currently open updates itself the instant
+  // a message arrives -- it no longer depends on DevicePage rebuilding.
+  final Map<String, ChatNotifier> privateChats = {};
+  final ChatNotifier commonChat = ChatNotifier();
 
-  // ==========================================================
-  // LIVE PHONE LOCATION
-  // ==========================================================
+  final List<AppNotification> notifications = [];
 
   final MapController _mapController = MapController();
-
   StreamSubscription<Position>? positionSubscription;
+  StreamSubscription<List<ScanResult>>? scanSubscription;
+  StreamSubscription<BluetoothConnectionState>? connectionSubscription;
+  StreamSubscription<List<int>>? notificationSubscription;
 
   LatLng? currentLocation;
-
   bool _mapReady = false;
   bool _hasCenteredOnLocation = false;
 
-  // ==========================================================
-  // PMTILES VECTOR MAP
-  // ==========================================================
-
   vt.PmTilesVectorTileProvider? pmtilesProvider;
-
   final OfflineMapManager _offlineMapManager = OfflineMapManager();
-
   vt.Theme? mapTheme;
-
   bool mapLoading = true;
   String? mapError;
 
   BluetoothDevice? connectedDevice;
-
   BluetoothCharacteristic? rxCharacteristic;
   BluetoothCharacteristic? txCharacteristic;
 
-  StreamSubscription<List<ScanResult>>? scanSubscription;
-
-  StreamSubscription<BluetoothConnectionState>?
-  connectionSubscription;
-
-  StreamSubscription<List<int>>?
-  notificationSubscription;
-
   String status = 'Disconnected';
-
   bool isScanning = false;
   bool isConnecting = false;
+  bool showBlePanel = true;
 
-  // ==========================================================
-  // UUIDs
-  // ==========================================================
-
-  final Guid serviceUuid = Guid(
-    '6E400001-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  final Guid rxUuid = Guid(
-    '6E400002-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  final Guid txUuid = Guid(
-    '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
-
-  // ==========================================================
-  // LOCATION SHARING
-  // ==========================================================
+  final Guid serviceUuid =
+  Guid('6E400001-B5A3-F393-E0A9-E50E24DCCA9E');
+  final Guid rxUuid =
+  Guid('6E400002-B5A3-F393-E0A9-E50E24DCCA9E');
+  final Guid txUuid =
+  Guid('6E400003-B5A3-F393-E0A9-E50E24DCCA9E');
 
   Timer? locationTimer;
-
   final Battery battery = Battery();
-
   bool locationSending = false;
-
   String mobileDeviceId = 'PHONE';
-
   bool locationPermissionReady = false;
 
-  // ==========================================================
-  // INIT
-  // ==========================================================
+  // Voice messaging.
+  final AudioRecorder _voiceRecorder = AudioRecorder();
+  final Map<int, _IncomingVoiceMessage> _incomingVoiceMessages = {};
+
+  int get unreadNotifications =>
+      notifications.where((n) => !n.read).length;
 
   @override
   void initState() {
     super.initState();
 
-    scanSubscription =
-        FlutterBluePlus.scanResults.listen(
-              (results) {
-            if (!mounted) return;
-
-            setState(() {
-              scanResults.clear();
-              scanResults.addAll(results);
-            });
-          },
-        );
+    scanSubscription = FlutterBluePlus.scanResults.listen((results) {
+      if (!mounted) return;
+      final unique = <String, ScanResult>{};
+      for (final result in results) {
+        unique[result.device.remoteId.toString()] = result;
+      }
+      setState(() {
+        scanResults
+          ..clear()
+          ..addAll(unique.values);
+      });
+    });
 
     _initializeOfflineMap();
-
     _initializeMobileDeviceId();
-
     _initializeLiveLocation();
   }
 
-  // ==========================================================
-  // MOBILE DEVICE ID
-  // ==========================================================
-
   Future<void> _initializeMobileDeviceId() async {
     try {
-      final directory =
-      await getApplicationDocumentsDirectory();
-
-      final file = File(
-        '${directory.path}/lora_tracker_device_id.txt',
-      );
+      final directory = await getApplicationDocumentsDirectory();
+      final file = File('${directory.path}/lora_tracker_device_id.txt');
 
       if (await file.exists()) {
-        final existingId =
-        (await file.readAsString()).trim();
-
-        if (existingId.isNotEmpty) {
-          if (!mounted) return;
-
-          setState(() {
-            mobileDeviceId = existingId;
-          });
-
-          debugPrint(
-            'MOBILE DEVICE ID: $mobileDeviceId',
-          );
-
+        final existingId = (await file.readAsString()).trim();
+        if (existingId.isNotEmpty && mounted) {
+          setState(() => mobileDeviceId = existingId);
           return;
         }
       }
 
       final random = Random.secure();
+      final id = 'PHONE_'
+          '${random.nextInt(0xFFFF).toRadixString(16).padLeft(4, '0').toUpperCase()}'
+          '${random.nextInt(0xFFFF).toRadixString(16).padLeft(4, '0').toUpperCase()}';
 
-      final part1 =
-      random.nextInt(0xFFFF)
-          .toRadixString(16)
-          .padLeft(4, '0')
-          .toUpperCase();
-
-      final part2 =
-      random.nextInt(0xFFFF)
-          .toRadixString(16)
-          .padLeft(4, '0')
-          .toUpperCase();
-
-      final generatedId =
-          'PHONE_$part1$part2';
-
-      await file.writeAsString(
-        generatedId,
-        flush: true,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        mobileDeviceId = generatedId;
-      });
-
-      debugPrint(
-        'MOBILE DEVICE ID CREATED: $mobileDeviceId',
-      );
+      await file.writeAsString(id, flush: true);
+      if (mounted) setState(() => mobileDeviceId = id);
     } catch (e) {
-      debugPrint(
-        'MOBILE DEVICE ID ERROR: $e',
-      );
+      debugPrint('MOBILE DEVICE ID ERROR: $e');
     }
   }
 
-  // ==========================================================
-  // INITIALIZE OFFLINE MAP
-  // ==========================================================
-
   Future<void> _initializeOfflineMap() async {
     try {
-      debugPrint(
-        'PMTILES: Initializing Sathya offline map...',
-      );
-
-      final pmtilesUrl =
-      await _offlineMapManager.start();
-
+      final pmtilesUrl = await _offlineMapManager.start();
       if (!mounted) {
         await _offlineMapManager.dispose();
         return;
       }
 
-      debugPrint(
-        'PMTILES: Opening local vector tile provider...',
-      );
-
       final provider =
-      await vt.PmTilesVectorTileProvider.open(
-        pmtilesUrl,
-      );
-
-      debugPrint(
-        'PMTILES: Creating offline map theme...',
-      );
-
+      await vt.PmTilesVectorTileProvider.open(pmtilesUrl);
       final theme = vt.ThemeReader(
         logger: const vt.Logger.console(),
       ).read(_offlineMapStyle);
 
       if (!mounted) return;
-
       setState(() {
         pmtilesProvider = provider;
         mapTheme = theme;
         mapLoading = false;
         mapError = null;
       });
-
-      debugPrint(
-        'PMTILES: READY',
-      );
     } catch (e, stackTrace) {
-      debugPrint(
-        'PMTILES ERROR: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
-
+      debugPrint('PMTILES ERROR: $e');
+      debugPrint(stackTrace.toString());
       if (!mounted) return;
-
       setState(() {
         mapLoading = false;
         mapError = e.toString();
@@ -1456,27 +1408,66 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
-  // ==========================================================
-  // DISPOSE
-  // ==========================================================
+  Future<void> _initializeLiveLocation() async {
+    try {
+      final ready = await _prepareLocationPermission();
+      if (!ready) return;
 
-  @override
-  void dispose() {
-    locationTimer?.cancel();
-    positionSubscription?.cancel();
+      locationPermissionReady = true;
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      _updateCurrentMapLocation(position, centerMap: true);
 
-    scanSubscription?.cancel();
-    connectionSubscription?.cancel();
-    notificationSubscription?.cancel();
-
-    _offlineMapManager.dispose();
-
-    super.dispose();
+      await positionSubscription?.cancel();
+      positionSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 5,
+        ),
+      ).listen(
+        _updateCurrentMapLocation,
+        onError: (e) => debugPrint('MAP LOCATION STREAM ERROR: $e'),
+      );
+    } catch (e) {
+      debugPrint('MAP LOCATION ERROR: $e');
+    }
   }
 
-  // ==========================================================
-  // SCAN
-  // ==========================================================
+  void _updateCurrentMapLocation(
+      Position position, {
+        bool centerMap = false,
+      }) {
+    if (!mounted) return;
+    final location = LatLng(position.latitude, position.longitude);
+
+    setState(() => currentLocation = location);
+
+    if ((_mapReady && !_hasCenteredOnLocation) || centerMap) {
+      if (_mapReady) {
+        _mapController.move(location, 14);
+        _hasCenteredOnLocation = true;
+      }
+    }
+  }
+
+  Future<bool> _prepareLocationPermission() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return false;
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      return permission != LocationPermission.denied &&
+          permission != LocationPermission.deniedForever;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<void> startScan() async {
     if (isScanning) return;
@@ -1488,32 +1479,23 @@ class _DevicePageState extends State<DevicePage> {
     });
 
     try {
-      final bluetoothState =
-      await FlutterBluePlus.adapterState.first;
-
-      if (bluetoothState != BluetoothAdapterState.on) {
-        if (!mounted) return;
-
-        setState(() {
-          status = 'Bluetooth is OFF';
-          isScanning = false;
-        });
-
+      final state = await FlutterBluePlus.adapterState.first;
+      if (state != BluetoothAdapterState.on) {
+        if (mounted) {
+          setState(() {
+            isScanning = false;
+            status = 'Bluetooth is OFF';
+          });
+        }
         return;
       }
 
-      final locationEnabled =
-      await Geolocator.isLocationServiceEnabled();
-
-      if (!locationEnabled) {
-        if (!mounted) return;
-
+      final locationEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!locationEnabled && mounted) {
         setState(() {
-          status =
-          'Turn ON Location to scan Bluetooth';
           isScanning = false;
+          status = 'Turn ON Location to scan Bluetooth';
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -1521,36 +1503,26 @@ class _DevicePageState extends State<DevicePage> {
             ),
           ),
         );
-
         return;
       }
 
-      LocationPermission permission =
-      await Geolocator.checkPermission();
-
+      var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
-        permission =
-        await Geolocator.requestPermission();
+        permission = await Geolocator.requestPermission();
       }
 
       if (permission == LocationPermission.denied ||
-          permission ==
-              LocationPermission.deniedForever) {
-        if (!mounted) return;
-
-        setState(() {
-          status = 'Location permission required';
-          isScanning = false;
-        });
-
+          permission == LocationPermission.deniedForever) {
+        if (mounted) {
+          setState(() {
+            isScanning = false;
+            status = 'Location permission required';
+          });
+        }
         return;
       }
 
-      if (!mounted) return;
-
-      setState(() {
-        status = 'Scanning for devices...';
-      });
+      if (mounted) setState(() => status = 'Scanning for devices...');
 
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 5),
@@ -1558,25 +1530,16 @@ class _DevicePageState extends State<DevicePage> {
       );
 
       if (!mounted) return;
-
       setState(() {
         isScanning = false;
-
         status = scanResults.isEmpty
             ? 'No devices found'
             : '${scanResults.length} device(s) found';
       });
     } catch (e, stackTrace) {
-      debugPrint(
-        'SCAN ERROR: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
-
+      debugPrint('SCAN ERROR: $e');
+      debugPrint(stackTrace.toString());
       if (!mounted) return;
-
       setState(() {
         isScanning = false;
         status = 'Scan failed';
@@ -1584,21 +1547,11 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
-  // ==========================================================
-  // CONNECT
-  // ==========================================================
-
-  Future<void> connectToDevice(
-      BluetoothDevice device,
-      ) async {
+  Future<void> connectToDevice(BluetoothDevice device) async {
     if (isConnecting) return;
 
-    if (connectedDevice != null) {
-      if (connectedDevice!.remoteId ==
-          device.remoteId) {
-        return;
-      }
-
+    if (connectedDevice != null &&
+        connectedDevice!.remoteId != device.remoteId) {
       await disconnectDevice();
     }
 
@@ -1614,604 +1567,491 @@ class _DevicePageState extends State<DevicePage> {
       );
 
       connectedDevice = device;
-
-      debugPrint(
-        'CONNECTED: ${device.platformName}',
-      );
-
       await connectionSubscription?.cancel();
+      connectionSubscription = device.connectionState.listen((state) {
+        if (!mounted) return;
 
-      connectionSubscription =
-          device.connectionState.listen(
-                (state) {
-              debugPrint(
-                'Connection state: $state',
-              );
-
-              if (!mounted) return;
-
-              if (state ==
-                  BluetoothConnectionState.connected) {
-                setState(() {
-                  status = 'Connected';
-                });
-              } else {
-                _stopLocationSharing();
-
-                setState(() {
-                  status = 'Disconnected';
-                  connectedDevice = null;
-                  rxCharacteristic = null;
-                  txCharacteristic = null;
-                });
-              }
-            },
-          );
+        if (state == BluetoothConnectionState.connected) {
+          setState(() {
+            status = 'Connected';
+            showBlePanel = false;
+          });
+        } else {
+          _stopLocationSharing();
+          setState(() {
+            status = 'Disconnected';
+            connectedDevice = null;
+            rxCharacteristic = null;
+            txCharacteristic = null;
+            showBlePanel = true;
+          });
+        }
+      });
 
       await discoverServices(device);
 
-      if (rxCharacteristic == null ||
-          txCharacteristic == null) {
-        throw Exception(
-          'Required BLE characteristics not found',
-        );
+      if (rxCharacteristic == null || txCharacteristic == null) {
+        throw Exception('Required BLE characteristics not found');
       }
 
       if (!mounted) return;
-
       setState(() {
         isConnecting = false;
         status = 'Connected';
+        showBlePanel = false;
       });
 
       await _startLocationSharing();
     } catch (e, stackTrace) {
-      debugPrint(
-        'CONNECTION ERROR: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint('CONNECTION ERROR: $e');
+      debugPrint(stackTrace.toString());
 
       await cleanupBle();
-
       try {
         await device.disconnect();
       } catch (_) {}
 
       if (!mounted) return;
-
       setState(() {
         isConnecting = false;
         connectedDevice = null;
         status = 'Connection failed';
+        showBlePanel = true;
       });
     }
   }
 
-  // ==========================================================
-  // DISCOVER SERVICES
-  // ==========================================================
-
-  Future<void> discoverServices(
-      BluetoothDevice device,
-      ) async {
-    debugPrint(
-      '========== SERVICE DISCOVERY ==========',
-    );
-
-    final services =
-    await device.discoverServices();
-
+  Future<void> discoverServices(BluetoothDevice device) async {
+    final services = await device.discoverServices();
     BluetoothCharacteristic? foundRx;
     BluetoothCharacteristic? foundTx;
 
     for (final service in services) {
-      debugPrint(
-        'SERVICE: ${service.uuid}',
-      );
+      if (service.uuid != serviceUuid) continue;
 
-      if (service.uuid != serviceUuid) {
-        continue;
-      }
-
-      for (final characteristic
-      in service.characteristics) {
-        debugPrint(
-          'CHARACTERISTIC: ${characteristic.uuid}',
-        );
-
-        if (characteristic.uuid == rxUuid) {
-          foundRx = characteristic;
-
-          debugPrint(
-            'RX CHARACTERISTIC FOUND',
-          );
-        }
-
-        if (characteristic.uuid == txUuid) {
-          foundTx = characteristic;
-
-          debugPrint(
-            'TX CHARACTERISTIC FOUND',
-          );
-        }
+      for (final characteristic in service.characteristics) {
+        if (characteristic.uuid == rxUuid) foundRx = characteristic;
+        if (characteristic.uuid == txUuid) foundTx = characteristic;
       }
     }
 
-    if (foundRx == null) {
-      throw Exception(
-        'RX characteristic not found',
-      );
-    }
-
-    if (foundTx == null) {
-      throw Exception(
-        'TX characteristic not found',
-      );
-    }
+    if (foundRx == null) throw Exception('RX characteristic not found');
+    if (foundTx == null) throw Exception('TX characteristic not found');
 
     rxCharacteristic = foundRx;
     txCharacteristic = foundTx;
 
     await notificationSubscription?.cancel();
-
-    notificationSubscription =
-        txCharacteristic!.onValueReceived.listen(
-          handleIncomingBleData,
-          onError: (error) {
-            debugPrint(
-              'BLE NOTIFICATION ERROR: $error',
-            );
-          },
-          cancelOnError: false,
-        );
+    notificationSubscription = txCharacteristic!.onValueReceived.listen(
+      handleIncomingBleData,
+      onError: (e) => debugPrint('BLE NOTIFICATION ERROR: $e'),
+      cancelOnError: false,
+    );
 
     await txCharacteristic!.setNotifyValue(true);
-
-    debugPrint(
-      'TX NOTIFICATIONS ENABLED',
-    );
-
-    debugPrint(
-      '========== SERVICE DISCOVERY END ==========',
-    );
   }
 
-  // ==========================================================
-  // BLE RECEIVE
-  // ==========================================================
-
-  void handleIncomingBleData(
-      List<int> value,
-      ) {
+  void handleIncomingBleData(List<int> value) {
     if (value.isEmpty) return;
 
-    final message = utf8.decode(
-      value,
-      allowMalformed: true,
-    ).trim();
+    final voicePacket = VoicePacket.decode(value);
+    if (voicePacket != null) {
+      _handleIncomingVoicePacket(voicePacket);
+      return;
+    }
 
+    final message = utf8.decode(value, allowMalformed: true).trim();
     if (message.isEmpty) return;
 
-    debugPrint(
-      '================================',
-    );
-
-    debugPrint(
-      'BLE DATA RECEIVED',
-    );
-
-    debugPrint(
-      'DATA: $message',
-    );
-
-    debugPrint(
-      '================================',
-    );
-
-    final packet =
-    LocationPacket.parse(message);
-
-    if (packet != null) {
-      debugPrint(
-        'LOCATION PACKET DETECTED',
+    final locationPacket = LocationPacket.parse(message);
+    if (locationPacket != null) {
+      final node = NodeInfo(
+        id: locationPacket.deviceId,
+        latitude: locationPacket.latitude,
+        longitude: locationPacket.longitude,
+        battery: locationPacket.battery,
+        lastSeen: DateTime.now(),
       );
 
-      debugPrint(
-        'Device ID : ${packet.deviceId}',
-      );
-
-      debugPrint(
-        'Latitude  : ${packet.latitude}',
-      );
-
-      debugPrint(
-        'Longitude : ${packet.longitude}',
-      );
-
-      debugPrint(
-        'Timestamp : ${packet.timestamp}',
-      );
-
-      debugPrint(
-        'Battery   : ${packet.battery}%',
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        receivedLocations[packet.deviceId] =
-            packet;
-      });
-
+      if (mounted) {
+        setState(() => nodes[locationPacket.deviceId] = node);
+      }
       return;
     }
 
-    debugPrint(
-      'NORMAL BLE MESSAGE',
-    );
-  }
-
-  // ==========================================================
-  // LIVE MAP LOCATION
-  // ==========================================================
-
-  Future<void> _initializeLiveLocation() async {
-    try {
-      final ready = await _prepareLocationPermission();
-
-      if (!ready) {
-        debugPrint(
-          'MAP LOCATION: Permission/service not ready',
-        );
-        return;
-      }
-
-      locationPermissionReady = true;
-
-      debugPrint(
-        'MAP LOCATION: Getting current GPS position...',
-      );
-
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-        ),
-      );
-
-      _updateCurrentMapLocation(position, centerMap: true);
-
-      positionSubscription?.cancel();
-      positionSubscription = Geolocator.getPositionStream(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          distanceFilter: 5,
-        ),
-      ).listen(
-            (position) {
-          _updateCurrentMapLocation(position);
-        },
-        onError: (error) {
-          debugPrint('MAP LOCATION STREAM ERROR: $error');
-        },
-      );
-    } catch (e, stackTrace) {
-      debugPrint('MAP LOCATION ERROR: $e');
-      debugPrint(stackTrace.toString());
-    }
-  }
-
-  void _updateCurrentMapLocation(
-      Position position, {
-        bool centerMap = false,
-      }) {
-    if (!mounted) return;
-
-    final location = LatLng(
-      position.latitude,
-      position.longitude,
-    );
-
-    setState(() {
-      currentLocation = location;
-    });
-
-    if ((_mapReady && !_hasCenteredOnLocation) || centerMap) {
-      if (_mapReady) {
-        _mapController.move(location, 14);
-        _hasCenteredOnLocation = true;
-      }
-    }
-
-    debugPrint(
-      'MAP LOCATION: ${position.latitude}, ${position.longitude}',
-    );
-  }
-
-  void _centerOnCurrentLocation() {
-    final location = currentLocation;
-
-    if (location == null) {
-      _initializeLiveLocation();
+    final routed = RoutingPacket.parse(message);
+    if (routed != null) {
+      _handleRoutedMessage(routed);
       return;
     }
 
-    _mapController.move(location, 14);
-    _hasCenteredOnLocation = true;
+    // Backward-compatible raw message handling.
+    _handleRawIncomingMessage(message);
   }
 
-  // ==========================================================
-  // START LOCATION SHARING
-  // ==========================================================
+  void _handleRoutedMessage(ParsedRoutingPacket packet) {
+    if (packet.scope == ChatScope.privateChat &&
+        packet.to != mobileDeviceId &&
+        packet.to != 'ALL') {
+      return;
+    }
+
+    final msg = ChatMessage(
+      id: '${DateTime.now().microsecondsSinceEpoch}',
+      senderId: packet.from,
+      recipientId:
+      packet.scope == ChatScope.privateChat ? mobileDeviceId : null,
+      text: packet.text,
+      fromMe: false,
+      time: DateTime.now(),
+    );
+
+    if (packet.scope == ChatScope.privateChat) {
+      privateChats.putIfAbsent(packet.from, () => ChatNotifier()).add(msg);
+      _addNotification(
+        senderId: packet.from,
+        preview: packet.text,
+        isPrivate: true,
+      );
+    } else {
+      commonChat.add(msg);
+    }
+
+    // Still needed here: this drives the notifications badge and the
+    // node list, both of which DevicePage itself renders.
+    if (mounted) setState(() {});
+  }
+
+  void _handleRawIncomingMessage(String message) {
+    final msg = ChatMessage(
+      id: '${DateTime.now().microsecondsSinceEpoch}',
+      senderId: 'ESP32',
+      text: message,
+      fromMe: false,
+      time: DateTime.now(),
+    );
+
+    commonChat.add(msg);
+    _addNotification(
+      senderId: 'ESP32',
+      preview: message,
+      isPrivate: false,
+    );
+
+    if (mounted) setState(() {});
+  }
+
+  void _addNotification({
+    required String senderId,
+    required String preview,
+    required bool isPrivate,
+  }) {
+    notifications.insert(
+      0,
+      AppNotification(
+        id: '${DateTime.now().microsecondsSinceEpoch}',
+        senderId: senderId,
+        preview: preview,
+        time: DateTime.now(),
+        isPrivate: isPrivate,
+      ),
+    );
+    if (notifications.length > 100) {
+      notifications.removeLast();
+    }
+  }
 
   Future<void> _startLocationSharing() async {
-    if (rxCharacteristic == null) {
-      debugPrint(
-        'LOCATION: RX characteristic unavailable',
-      );
-      return;
-    }
+    if (rxCharacteristic == null) return;
 
-    debugPrint(
-      'LOCATION: Preparing location permission...',
-    );
-
-    final permissionReady =
-    await _prepareLocationPermission();
-
-    if (!permissionReady) {
-      debugPrint(
-        'LOCATION: Permission/service not ready',
-      );
-
-      return;
-    }
+    final ready = await _prepareLocationPermission();
+    if (!ready) return;
 
     locationPermissionReady = true;
-
     locationTimer?.cancel();
 
     await _sendCurrentLocation();
 
     locationTimer = Timer.periodic(
       const Duration(seconds: 30),
-          (_) async {
-        await _sendCurrentLocation();
-      },
-    );
-
-    debugPrint(
-      'LOCATION: Periodic sharing started - every 30 seconds',
+          (_) => _sendCurrentLocation(),
     );
   }
-
-  // ==========================================================
-  // STOP LOCATION SHARING
-  // ==========================================================
 
   void _stopLocationSharing() {
     locationTimer?.cancel();
     locationTimer = null;
-
     locationSending = false;
-
-    debugPrint(
-      'LOCATION: Periodic sharing stopped',
-    );
   }
-
-  // ==========================================================
-  // LOCATION PERMISSION
-  // ==========================================================
-
-  Future<bool> _prepareLocationPermission() async {
-    try {
-      final serviceEnabled =
-      await Geolocator.isLocationServiceEnabled();
-
-      if (!serviceEnabled) {
-        debugPrint(
-          'LOCATION: Location service is OFF',
-        );
-
-        return false;
-      }
-
-      LocationPermission permission =
-      await Geolocator.checkPermission();
-
-      if (permission ==
-          LocationPermission.denied) {
-        debugPrint(
-          'LOCATION: Requesting permission...',
-        );
-
-        permission =
-        await Geolocator.requestPermission();
-      }
-
-      if (permission ==
-          LocationPermission.denied ||
-          permission ==
-              LocationPermission.deniedForever) {
-        debugPrint(
-          'LOCATION: Permission denied',
-        );
-
-        return false;
-      }
-
-      debugPrint(
-        'LOCATION: Permission available',
-      );
-
-      return true;
-    } catch (e) {
-      debugPrint(
-        'LOCATION PERMISSION ERROR: $e',
-      );
-
-      return false;
-    }
-  }
-
-  // ==========================================================
-  // SEND CURRENT MOBILE LOCATION
-  // ==========================================================
 
   Future<void> _sendCurrentLocation() async {
-    if (locationSending) {
-      debugPrint(
-        'LOCATION: Previous transmission still running',
-      );
-
-      return;
-    }
-
-    if (connectedDevice == null ||
+    if (locationSending ||
+        connectedDevice == null ||
         rxCharacteristic == null) {
-      debugPrint(
-        'LOCATION: ESP32 not connected',
-      );
-
       return;
     }
 
     if (!locationPermissionReady) {
-      final ready =
-      await _prepareLocationPermission();
-
-      if (!ready) {
-        debugPrint(
-          'LOCATION: Location permission unavailable',
-        );
-
-        return;
-      }
-
+      final ready = await _prepareLocationPermission();
+      if (!ready) return;
       locationPermissionReady = true;
     }
 
     locationSending = true;
-
     try {
-      debugPrint(
-        'LOCATION: Getting current GPS position...',
-      );
-
-      final position =
-      await Geolocator.getCurrentPosition(
-        locationSettings:
-        const LocationSettings(
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
         ),
       );
-
-      final batteryLevel =
-      await battery.batteryLevel;
-
+      final batteryLevel = await battery.batteryLevel;
       final now = DateTime.now();
-
       final timestamp =
           '${now.hour.toString().padLeft(2, '0')}:'
           '${now.minute.toString().padLeft(2, '0')}:'
           '${now.second.toString().padLeft(2, '0')}';
 
       final packet =
-          'LOC,'
-          '$mobileDeviceId,'
+          'LOC,$mobileDeviceId,'
           '${position.latitude.toStringAsFixed(6)},'
           '${position.longitude.toStringAsFixed(6)},'
-          '$timestamp,'
-          '$batteryLevel';
-
-      debugPrint(
-        '================================',
-      );
-
-      debugPrint(
-        'MOBILE LOCATION',
-      );
-
-      debugPrint(
-        'Device ID : $mobileDeviceId',
-      );
-
-      debugPrint(
-        'Latitude  : ${position.latitude}',
-      );
-
-      debugPrint(
-        'Longitude : ${position.longitude}',
-      );
-
-      debugPrint(
-        'Timestamp : $timestamp',
-      );
-
-      debugPrint(
-        'Battery   : $batteryLevel%',
-      );
-
-      debugPrint(
-        'PACKET    : $packet',
-      );
-
-      debugPrint(
-        '================================',
-      );
+          '$timestamp,$batteryLevel';
 
       await rxCharacteristic!.write(
         utf8.encode(packet),
         withoutResponse: false,
       );
-
-      debugPrint(
-        'LOCATION: Sent to ESP32 successfully',
-      );
-    } catch (e, stackTrace) {
-      debugPrint(
-        'LOCATION SEND ERROR: $e',
-      );
-
-      debugPrint(
-        stackTrace.toString(),
-      );
+    } catch (e) {
+      debugPrint('LOCATION SEND ERROR: $e');
     } finally {
       locationSending = false;
     }
   }
 
-  // ==========================================================
-  // CLEAN BLE
-  // ==========================================================
+  Future<void> sendPrivateText(String nodeId, String text) async {
+    text = text.trim();
+    if (text.isEmpty || rxCharacteristic == null) return;
+
+    final packet = RoutingPacket.privateText(
+      from: mobileDeviceId,
+      to: nodeId,
+      text: text,
+    );
+
+    try {
+      await rxCharacteristic!.write(
+        utf8.encode(packet),
+        withoutResponse: false,
+      );
+
+      final message = ChatMessage(
+        id: '${DateTime.now().microsecondsSinceEpoch}',
+        senderId: mobileDeviceId,
+        recipientId: nodeId,
+        text: text,
+        fromMe: true,
+        time: DateTime.now(),
+      );
+
+      privateChats.putIfAbsent(nodeId, () => ChatNotifier()).add(message);
+    } catch (e) {
+      _showSnack('Failed to send private message');
+      debugPrint('PRIVATE SEND ERROR: $e');
+    }
+  }
+
+  Future<void> sendCommonText(String text) async {
+    text = text.trim();
+    if (text.isEmpty || rxCharacteristic == null) return;
+
+    final packet = RoutingPacket.commonText(
+      from: mobileDeviceId,
+      text: text,
+    );
+
+    try {
+      await rxCharacteristic!.write(
+        utf8.encode(packet),
+        withoutResponse: false,
+      );
+
+      commonChat.add(
+        ChatMessage(
+          id: '${DateTime.now().microsecondsSinceEpoch}',
+          senderId: mobileDeviceId,
+          text: text,
+          fromMe: true,
+          time: DateTime.now(),
+        ),
+      );
+    } catch (e) {
+      _showSnack('Failed to send common message');
+      debugPrint('COMMON SEND ERROR: $e');
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Voice messaging (Common Chat only for now).
+  //
+  // VoicePacket has no sender/recipient field, so there is currently
+  // no way to route an incoming voice clip to a specific private
+  // conversation. Until the ESP32 firmware adds that metadata, voice
+  // messages -- sent and received -- live in Common Chat, matching
+  // the existing fallback behavior used for unrouted raw text.
+  // ----------------------------------------------------------
+
+  Future<void> _startVoiceRecording() async {
+    try {
+      final hasPermission = await _voiceRecorder.hasPermission();
+      if (!hasPermission) {
+        _showSnack('Microphone permission is required to record voice messages');
+        return;
+      }
+
+      final directory = await getApplicationDocumentsDirectory();
+      final path =
+          '${directory.path}/voice_out_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+      await _voiceRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 32000,
+          sampleRate: 16000,
+        ),
+        path: path,
+      );
+    } catch (e) {
+      debugPrint('VOICE RECORD START ERROR: $e');
+      _showSnack('Could not start recording');
+    }
+  }
+
+  Future<void> _stopVoiceRecordingAndSend() async {
+    try {
+      final path = await _voiceRecorder.stop();
+      if (path == null) return;
+
+      final file = File(path);
+      if (!await file.exists()) return;
+
+      final bytes = await file.readAsBytes();
+      if (bytes.isEmpty) return;
+
+      if (connectedDevice == null || rxCharacteristic == null) {
+        _showSnack('Not connected to a LoRa node');
+        return;
+      }
+
+      await _sendVoiceBytes(bytes, localAudioPath: path);
+    } catch (e) {
+      debugPrint('VOICE RECORD STOP ERROR: $e');
+      _showSnack('Failed to send voice message');
+    }
+  }
+
+  Future<void> _sendVoiceBytes(
+      List<int> bytes, {
+        required String localAudioPath,
+      }) async {
+    // 32-bit message id, derived from the clock -- good enough to avoid
+    // collisions between consecutive voice messages from this phone.
+    final messageId = DateTime.now().millisecondsSinceEpoch & 0xFFFFFFFF;
+    final totalChunks =
+    (bytes.length / VoicePacket.maxPayload).ceil().clamp(1, 0xFFFF);
+
+    try {
+      for (var i = 0; i < totalChunks; i++) {
+        final start = i * VoicePacket.maxPayload;
+        final end = min(start + VoicePacket.maxPayload, bytes.length);
+
+        final packet = VoicePacket(
+          messageId: messageId,
+          chunkIndex: i,
+          totalChunks: totalChunks,
+          flags: 0,
+          payload: bytes.sublist(start, end),
+        );
+
+        await rxCharacteristic!.write(
+          packet.encode(),
+          withoutResponse: false,
+        );
+
+        // Small pacing delay so the ESP32's BLE stack isn't flooded --
+        // tune/remove once the firmware side is confirmed to keep up.
+        await Future.delayed(const Duration(milliseconds: 15));
+      }
+
+      commonChat.add(
+        ChatMessage(
+          id: '$messageId',
+          senderId: mobileDeviceId,
+          text: '',
+          fromMe: true,
+          time: DateTime.now(),
+          type: ChatMessageType.voice,
+          audioPath: localAudioPath,
+        ),
+      );
+    } catch (e) {
+      debugPrint('VOICE SEND ERROR: $e');
+      _showSnack('Failed to send voice message');
+    }
+  }
+
+  Future<void> _handleIncomingVoicePacket(VoicePacket packet) async {
+    final incoming = _incomingVoiceMessages.putIfAbsent(
+      packet.messageId,
+          () => _IncomingVoiceMessage(packet.totalChunks),
+    );
+
+    incoming.chunks[packet.chunkIndex] = packet.payload;
+
+    if (!incoming.complete) return;
+
+    _incomingVoiceMessages.remove(packet.messageId);
+
+    try {
+      final bytes = incoming.assemble();
+      final directory = await getApplicationDocumentsDirectory();
+      final path = '${directory.path}/voice_in_${packet.messageId}.m4a';
+      final file = File(path);
+      await file.writeAsBytes(bytes, flush: true);
+
+      commonChat.add(
+        ChatMessage(
+          id: '${packet.messageId}',
+          senderId: 'ESP32',
+          text: '',
+          fromMe: false,
+          time: DateTime.now(),
+          type: ChatMessageType.voice,
+          audioPath: path,
+        ),
+      );
+
+      _addNotification(
+        senderId: 'ESP32',
+        preview: 'Voice message',
+        isPrivate: false,
+      );
+      if (mounted) setState(() {});
+    } catch (e) {
+      debugPrint('VOICE ASSEMBLE ERROR: $e');
+    }
+  }
 
   Future<void> cleanupBle() async {
     await notificationSubscription?.cancel();
-
     notificationSubscription = null;
-
     await connectionSubscription?.cancel();
-
     connectionSubscription = null;
-
     rxCharacteristic = null;
     txCharacteristic = null;
   }
 
-  // ==========================================================
-  // DISCONNECT
-  // ==========================================================
-
   Future<void> disconnectDevice() async {
     _stopLocationSharing();
-
-    debugPrint(
-      'Disconnecting device...',
-    );
-
     final device = connectedDevice;
 
     await cleanupBle();
@@ -2219,41 +2059,198 @@ class _DevicePageState extends State<DevicePage> {
     if (device != null) {
       try {
         await device.disconnect();
-      } catch (e) {
-        debugPrint(
-          'Disconnect error: $e',
-        );
-      }
+      } catch (_) {}
     }
 
     if (!mounted) return;
-
     setState(() {
       connectedDevice = null;
       status = 'Disconnected';
       isConnecting = false;
+      showBlePanel = true;
     });
   }
 
-  // ==========================================================
-  // DEVICE NAME
-  // ==========================================================
-
-  String getDeviceName(
-      BluetoothDevice device,
-      ) {
-    final name = device.platformName;
-
-    if (name.isNotEmpty) {
-      return name;
-    }
-
-    return 'ESP32 Device';
+  void _showSnack(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text)),
+    );
   }
 
-  // ==========================================================
-  // OFFLINE PMTILES MAP
-  // ==========================================================
+  String getDeviceName(BluetoothDevice device) {
+    final name = device.platformName;
+    return name.isNotEmpty ? name : 'ESP32 Device';
+  }
+
+  void _centerOnCurrentLocation() {
+    final location = currentLocation;
+    if (location == null) {
+      _initializeLiveLocation();
+      return;
+    }
+    _mapController.move(location, 14);
+    _hasCenteredOnLocation = true;
+  }
+
+  void _showNodePopup(NodeInfo node) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      builder: (context) {
+        final rssi = node.rssi;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF4FC),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: const Icon(
+                        Icons.router_rounded,
+                        color: Color(0xFF1769E0),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            node.id,
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            'Battery ${node.battery}%',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF727C8D),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _InfoTile(
+                        icon: Icons.signal_cellular_alt_rounded,
+                        label: 'RSSI',
+                        value: rssi == null ? 'N/A' : '$rssi dBm',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _InfoTile(
+                        icon: Icons.location_on_outlined,
+                        label: 'Position',
+                        value:
+                        '${node.latitude.toStringAsFixed(5)}, '
+                            '${node.longitude.toStringAsFixed(5)}',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: FilledButton.icon(
+                    onPressed: connectedDevice == null
+                        ? null
+                        : () {
+                      Navigator.pop(context);
+                      _openPrivateChat(node);
+                    },
+                    icon: const Icon(Icons.chat_bubble_outline_rounded),
+                    label: const Text('CHAT'),
+                  ),
+                ),
+                if (connectedDevice == null)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      'Connect the ESP32 over BLE before starting a chat.',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: Color(0xFF8A94A4),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openPrivateChat(NodeInfo node) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PrivateChatPage(
+          node: node,
+          mobileDeviceId: mobileDeviceId,
+          chat: privateChats.putIfAbsent(node.id, () => ChatNotifier()),
+          sendText: (text) => sendPrivateText(node.id, text),
+          connected: connectedDevice != null && rxCharacteristic != null,
+        ),
+      ),
+    );
+  }
+
+  void _openCommonChat() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CommonChatPage(
+          mobileDeviceId: mobileDeviceId,
+          chat: commonChat,
+          sendText: sendCommonText,
+          onVoiceHoldStart: _startVoiceRecording,
+          onVoiceHoldEnd: _stopVoiceRecordingAndSend,
+          connected: connectedDevice != null && rxCharacteristic != null,
+        ),
+      ),
+    );
+  }
+
+  void _openNotifications() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => NotificationPage(
+          notifications: notifications,
+          onOpen: (notification) {
+            notification.read = true;
+            final node = nodes[notification.senderId];
+            if (node != null) {
+              Navigator.pop(context);
+              _openPrivateChat(node);
+            } else {
+              Navigator.pop(context);
+              _showSnack('Sender ${notification.senderId} is not currently on the map.');
+            }
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
 
   Widget _buildOfflineMap() {
     if (mapLoading) {
@@ -2264,9 +2261,7 @@ class _DevicePageState extends State<DevicePage> {
             SizedBox(
               width: 28,
               height: 28,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-              ),
+              child: CircularProgressIndicator(strokeWidth: 2.5),
             ),
             SizedBox(height: 12),
             Text(
@@ -2282,8 +2277,7 @@ class _DevicePageState extends State<DevicePage> {
       );
     }
 
-    if (pmtilesProvider == null ||
-        mapTheme == null) {
+    if (pmtilesProvider == null || mapTheme == null) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
@@ -2321,15 +2315,7 @@ class _DevicePageState extends State<DevicePage> {
       );
     }
 
-    // ========================================================
-    // MARKERS
-    // ========================================================
-
-    final List<Marker> markers = [];
-
-    // --------------------------------------------------------
-    // PHONE / ACTUAL GPS LOCATION
-    // --------------------------------------------------------
+    final markers = <Marker>[];
 
     if (currentLocation != null) {
       markers.add(
@@ -2348,15 +2334,9 @@ class _DevicePageState extends State<DevicePage> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF1769E0),
                   borderRadius: BorderRadius.circular(6),
-                  boxShadow: const [
-                    BoxShadow(
-                      blurRadius: 4,
-                      color: Colors.black26,
-                    ),
-                  ],
                 ),
                 child: const Text(
-                  'PHONE',
+                  'YOU',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 9,
@@ -2375,72 +2355,51 @@ class _DevicePageState extends State<DevicePage> {
       );
     }
 
-    // --------------------------------------------------------
-    // RECEIVED DEVICES
-    // --------------------------------------------------------
-
-    for (final packet
-    in receivedLocations.values) {
+    for (final node in nodes.values) {
       markers.add(
         Marker(
-          point: LatLng(
-            packet.latitude,
-            packet.longitude,
-          ),
-          width: 95,
-          height: 72,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                constraints: const BoxConstraints(
-                  maxWidth: 90,
-                ),
-                padding:
-                const EdgeInsets.symmetric(
-                  horizontal: 7,
-                  vertical: 3,
-                ),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1F2937),
-                  borderRadius:
-                  BorderRadius.circular(6),
-                  boxShadow: const [
-                    BoxShadow(
-                      blurRadius: 4,
-                      color: Colors.black26,
+          point: LatLng(node.latitude, node.longitude),
+          width: 110,
+          height: 76,
+          child: GestureDetector(
+            onTap: () => _showNodePopup(node),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  constraints: const BoxConstraints(maxWidth: 100),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1F2937),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    node.id,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
                     ),
-                  ],
-                ),
-                child: Text(
-                  packet.deviceId,
-                  maxLines: 1,
-                  overflow:
-                  TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
-              const Icon(
-                Icons.location_on_rounded,
-                color: Color(0xFFD64545),
-                size: 38,
-              ),
-            ],
+                const Icon(
+                  Icons.location_on_rounded,
+                  color: Color(0xFFD64545),
+                  size: 38,
+                ),
+              ],
+            ),
           ),
         ),
       );
     }
 
-    // ========================================================
-    // MAP
-    // ========================================================
-
-    final mapCenter =
-        currentLocation ?? const LatLng(11.337, 77.115);
+    final mapCenter = currentLocation ?? const LatLng(11.337, 77.115);
 
     return Stack(
       children: [
@@ -2453,7 +2412,6 @@ class _DevicePageState extends State<DevicePage> {
             maxZoom: 16,
             onMapReady: () {
               _mapReady = true;
-
               final location = currentLocation;
               if (location != null && !_hasCenteredOnLocation) {
                 _mapController.move(location, 14);
@@ -2470,9 +2428,7 @@ class _DevicePageState extends State<DevicePage> {
               showLabels: true,
               logger: const vt.Logger.console(),
             ),
-            MarkerLayer(
-              markers: markers,
-            ),
+            MarkerLayer(markers: markers),
           ],
         ),
         Positioned(
@@ -2501,12 +2457,227 @@ class _DevicePageState extends State<DevicePage> {
     );
   }
 
-  // ==========================================================
-  // BUILD
-  // ==========================================================
+  Widget _buildBlePanel() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Color(0xFFE6EBF1)),
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Connect LoRa Node',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF202A3A),
+                    ),
+                  ),
+                ),
+                Text(
+                  '${scanResults.length} found',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF7B8493),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Scan',
+                  onPressed: isScanning ? null : startScan,
+                  icon: const Icon(Icons.refresh_rounded),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 9,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF7F9FC),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: connectedDevice != null
+                        ? Colors.green
+                        : Colors.grey,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    status,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF4C5666),
+                    ),
+                  ),
+                ),
+                if (isScanning)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 190,
+            child: scanResults.isEmpty
+                ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.bluetooth_searching_rounded,
+                    size: 30,
+                    color: Color(0xFF9AA3B2),
+                  ),
+                  const SizedBox(height: 7),
+                  const Text(
+                    'Scan and choose your ESP32 LoRa node',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF727C8D),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    onPressed: isScanning ? null : startScan,
+                    child: const Text('SCAN'),
+                  ),
+                ],
+              ),
+            )
+                : ListView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              itemCount: scanResults.length,
+              itemBuilder: (context, index) {
+                final result = scanResults[index];
+                final device = result.device;
+                final isConnected =
+                    connectedDevice?.remoteId == device.remoteId;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: ListTile(
+                    dense: true,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      side: const BorderSide(
+                        color: Color(0xFFE4E9EF),
+                      ),
+                    ),
+                    leading: const CircleAvatar(
+                      backgroundColor: Color(0xFFEFF4FC),
+                      child: Icon(
+                        Icons.developer_board_outlined,
+                        color: Color(0xFF1769E0),
+                      ),
+                    ),
+                    title: Text(
+                      getDeviceName(device),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    subtitle: Text(
+                      '${device.remoteId} • ${result.rssi} dBm',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                    trailing: isConnected
+                        ? const Icon(
+                      Icons.check_circle_rounded,
+                      color: Colors.green,
+                    )
+                        : SizedBox(
+                      height: 34,
+                      child: ElevatedButton(
+                        onPressed: isConnecting
+                            ? null
+                            : () => connectToDevice(device),
+                        child: Text(
+                          isConnecting ? '...' : 'CONNECT',
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomActions() {
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(color: Color(0xFFE6EBF1)),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _openNotifications,
+                icon: Badge(
+                  isLabelVisible: unreadNotifications > 0,
+                  label: Text('$unreadNotifications'),
+                  child: const Icon(Icons.notifications_none_rounded),
+                ),
+                label: const Text('Notifications'),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _openCommonChat,
+                icon: const Icon(Icons.forum_outlined),
+                label: const Text('Common Chat'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
+    final connected = connectedDevice != null;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text(
@@ -2517,296 +2688,106 @@ class _DevicePageState extends State<DevicePage> {
           ),
         ),
         actions: [
+          if (connected)
+            IconButton(
+              tooltip: 'BLE',
+              onPressed: () {
+                showModalBottomSheet<void>(
+                  context: context,
+                  showDragHandle: true,
+                  builder: (_) => SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ListTile(
+                            leading: const Icon(
+                              Icons.bluetooth_connected_rounded,
+                              color: Colors.green,
+                            ),
+                            title: Text(
+                              getDeviceName(connectedDevice!),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            subtitle: Text(
+                              connectedDevice!.remoteId.toString(),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 46,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                disconnectDevice();
+                              },
+                              icon: const Icon(Icons.bluetooth_disabled),
+                              label: const Text('Disconnect'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.bluetooth_connected_rounded),
+            ),
           IconButton(
-            tooltip: 'Scan',
-            onPressed:
-            isScanning ? null : startScan,
-            icon: const Icon(
-              Icons.refresh_rounded,
+            tooltip: 'Notifications',
+            onPressed: _openNotifications,
+            icon: Badge(
+              isLabelVisible: unreadNotifications > 0,
+              label: Text('$unreadNotifications'),
+              child: const Icon(Icons.notifications_none_rounded),
             ),
           ),
         ],
       ),
       body: Column(
         children: [
-          // ====================================================
-          // STATUS
-          // ====================================================
-
-          Padding(
-            padding:
-            const EdgeInsets.fromLTRB(
-              16,
-              12,
-              16,
-              8,
-            ),
-            child: Container(
-              width: double.infinity,
-              padding:
-              const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 12,
-              ),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius:
-                BorderRadius.circular(12),
-                border: Border.all(
-                  color: const Color(0xFFE7EBF0),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 9,
-                    height: 9,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color:
-                      connectedDevice != null
-                          ? Colors.green
-                          : Colors.grey,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      status,
-                      style:
-                      const TextStyle(
-                        fontSize: 13,
-                        fontWeight:
-                        FontWeight.w600,
-                        color:
-                        Color(0xFF303A4D),
-                      ),
-                    ),
-                  ),
-                  if (isScanning)
-                    const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child:
-                      CircularProgressIndicator(
-                        strokeWidth: 2,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-
-          // ====================================================
-          // MAP
-          // ====================================================
-
-          Padding(
-            padding:
-            const EdgeInsets.fromLTRB(
-              16,
-              4,
-              16,
-              10,
-            ),
-            child: SizedBox(
-              height: 280,
-              child: ClipRRect(
-                borderRadius:
-                BorderRadius.circular(14),
-                child: Container(
-                  color:
-                  const Color(0xFFE9EDF2),
-                  child:
-                  _buildOfflineMap(),
-                ),
-              ),
-            ),
-          ),
-
-          // ====================================================
-          // DEVICES TITLE
-          // ====================================================
-
-          Padding(
-            padding:
-            const EdgeInsets.symmetric(
-              horizontal: 16,
-            ),
-            child: Row(
-              children: [
-                const Text(
-                  'Nearby Devices',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight:
-                    FontWeight.w700,
-                    color:
-                    Color(0xFF202A3A),
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  '${scanResults.length} found',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color:
-                    Color(0xFF7B8493),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 8),
-
-          // ====================================================
-          // DEVICE LIST
-          // ====================================================
-
           Expanded(
-            child: scanResults.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisSize:
-                MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.bluetooth_disabled,
-                    size: 34,
-                    color:
-                    Color(0xFF9AA3B2),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'No devices found',
-                    style:
-                    TextStyle(
-                      fontSize: 14,
-                      color:
-                      Color(0xFF727C8D),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed:
-                    isScanning
-                        ? null
-                        : startScan,
-                    child:
-                    const Text('SCAN'),
-                  ),
-                ],
-              ),
-            )
-                : ListView.builder(
-              padding:
-              const EdgeInsets.fromLTRB(
-                16,
-                0,
-                16,
-                16,
-              ),
-              itemCount:
-              scanResults.length,
-              itemBuilder:
-                  (context, index) {
-                final result =
-                scanResults[index];
-
-                final device =
-                    result.device;
-
-                final isConnected =
-                    connectedDevice !=
-                        null &&
-                        connectedDevice!
-                            .remoteId ==
-                            device.remoteId;
-
-                return Padding(
-                  padding:
-                  const EdgeInsets.only(
-                    bottom: 8,
-                  ),
-                  child: _DeviceCard(
-                    name:
-                    getDeviceName(
-                      device,
-                    ),
-                    id: device.remoteId
-                        .toString(),
-                    rssi: result.rssi,
-                    connected:
-                    isConnected,
-                    connecting:
-                    isConnecting,
-                    onConnect: () {
-                      connectToDevice(
-                        device,
-                      );
-                    },
-                    onDisconnect:
-                    disconnectDevice,
-                    onChat:
-                    isConnected &&
-                        rxCharacteristic !=
-                            null
-                        ? () {
-                      Navigator.of(
-                        context,
-                      ).push(
-                        MaterialPageRoute(
-                          builder:
-                              (_) =>
-                              ChatPage(
-                                device:
-                                device,
-                                rxCharacteristic:
-                                rxCharacteristic!,
-                                onDisconnect:
-                                disconnectDevice,
-                              ),
-                        ),
-                      );
-                    }
-                        : null,
-                  ),
-                );
-              },
-            ),
+            child: _buildOfflineMap(),
           ),
+          if (!connected && showBlePanel)
+            _buildBlePanel()
+          else
+            _buildBottomActions(),
         ],
       ),
     );
   }
+
+  @override
+  void dispose() {
+    locationTimer?.cancel();
+    positionSubscription?.cancel();
+    scanSubscription?.cancel();
+    connectionSubscription?.cancel();
+    notificationSubscription?.cancel();
+    _offlineMapManager.dispose();
+    _voiceRecorder.dispose();
+    super.dispose();
+  }
 }
 
 // ============================================================
-// DEVICE CARD
+// INFO TILE
 // ============================================================
 
-class _DeviceCard extends StatelessWidget {
-  final String name;
-  final String id;
-  final int rssi;
+class _InfoTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
 
-  final bool connected;
-  final bool connecting;
-
-  final VoidCallback onConnect;
-  final VoidCallback onDisconnect;
-  final VoidCallback? onChat;
-
-  const _DeviceCard({
-    required this.name,
-    required this.id,
-    required this.rssi,
-    required this.connected,
-    required this.connecting,
-    required this.onConnect,
-    required this.onDisconnect,
-    this.onChat,
+  const _InfoTile({
+    required this.icon,
+    required this.label,
+    required this.value,
   });
 
   @override
@@ -2814,217 +2795,37 @@ class _DeviceCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(12),
-        border: Border.all(
-          color: connected
-              ? const Color(0xFF1769E0)
-              .withOpacity(0.35)
-              : const Color(0xFFE5E9EF),
-        ),
+        color: const Color(0xFFF7F9FC),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
         children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color:
-              const Color(0xFFEFF4FC),
-              borderRadius:
-              BorderRadius.circular(10),
-            ),
-            child: const Icon(
-              Icons.developer_board_outlined,
-              size: 22,
-              color:
-              Color(0xFF1769E0),
-            ),
-          ),
-          const SizedBox(width: 11),
+          Icon(icon, size: 20, color: const Color(0xFF1769E0)),
+          const SizedBox(width: 8),
           Expanded(
             child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  name,
-                  maxLines: 1,
-                  overflow:
-                  TextOverflow.ellipsis,
-                  style:
-                  const TextStyle(
-                    fontSize: 14,
-                    fontWeight:
-                    FontWeight.w700,
-                    color:
-                    Color(0xFF202A3A),
+                  label,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Color(0xFF8993A2),
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 2),
                 Text(
-                  id,
-                  maxLines: 1,
-                  overflow:
-                  TextOverflow.ellipsis,
-                  style:
-                  const TextStyle(
-                    fontSize: 10,
-                    color:
-                    Color(0xFF8A94A4),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'RSSI $rssi dBm',
-                  style:
-                  const TextStyle(
-                    fontSize: 10,
-                    color:
-                    Color(0xFF727C8D),
+                  value,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          if (connected)
-            Row(
-              mainAxisSize:
-              MainAxisSize.min,
-              children: [
-                SizedBox(
-                  height: 34,
-                  child:
-                  OutlinedButton.icon(
-                    onPressed: onChat,
-                    icon: const Icon(
-                      Icons
-                          .chat_bubble_outline_rounded,
-                      size: 15,
-                    ),
-                    label: const Text(
-                      'CHAT',
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontWeight:
-                        FontWeight.w700,
-                      ),
-                    ),
-                    style:
-                    OutlinedButton.styleFrom(
-                      foregroundColor:
-                      const Color(
-                        0xFF1769E0,
-                      ),
-                      side:
-                      const BorderSide(
-                        color:
-                        Color(
-                          0xFF1769E0,
-                        ),
-                      ),
-                      padding:
-                      const EdgeInsets
-                          .symmetric(
-                        horizontal: 9,
-                      ),
-                      shape:
-                      RoundedRectangleBorder(
-                        borderRadius:
-                        BorderRadius
-                            .circular(
-                          8,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                SizedBox(
-                  height: 34,
-                  child:
-                  ElevatedButton(
-                    onPressed:
-                    onDisconnect,
-                    style:
-                    ElevatedButton.styleFrom(
-                      backgroundColor:
-                      const Color(
-                        0xFFFCECEC,
-                      ),
-                      foregroundColor:
-                      const Color(
-                        0xFFD64545,
-                      ),
-                      elevation: 0,
-                      padding:
-                      const EdgeInsets
-                          .symmetric(
-                        horizontal: 9,
-                      ),
-                      shape:
-                      RoundedRectangleBorder(
-                        borderRadius:
-                        BorderRadius
-                            .circular(
-                          8,
-                        ),
-                      ),
-                    ),
-                    child:
-                    const Text(
-                      'DISCONNECT',
-                      style:
-                      TextStyle(
-                        fontSize: 10,
-                        fontWeight:
-                        FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          else
-            SizedBox(
-              height: 34,
-              child:
-              ElevatedButton(
-                onPressed:
-                connecting
-                    ? null
-                    : onConnect,
-                style:
-                ElevatedButton.styleFrom(
-                  elevation: 0,
-                  padding:
-                  const EdgeInsets
-                      .symmetric(
-                    horizontal: 13,
-                  ),
-                  shape:
-                  RoundedRectangleBorder(
-                    borderRadius:
-                    BorderRadius.circular(
-                      8,
-                    ),
-                  ),
-                ),
-                child: Text(
-                  connecting
-                      ? '...'
-                      : 'CONNECT',
-                  style:
-                  const TextStyle(
-                    fontSize: 11,
-                    fontWeight:
-                    FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -3032,941 +2833,510 @@ class _DeviceCard extends StatelessWidget {
 }
 
 // ============================================================
-// CHAT PAGE
+// PRIVATE CHAT
 // ============================================================
 
-class ChatPage extends StatefulWidget {
-  final BluetoothDevice device;
-  final BluetoothCharacteristic rxCharacteristic;
-  final Future<void> Function() onDisconnect;
+class PrivateChatPage extends StatefulWidget {
+  final NodeInfo node;
+  final String mobileDeviceId;
+  final ChatNotifier chat;
+  final Future<void> Function(String) sendText;
+  final bool connected;
 
-  const ChatPage({
+  const PrivateChatPage({
     super.key,
-    required this.device,
-    required this.rxCharacteristic,
-    required this.onDisconnect,
+    required this.node,
+    required this.mobileDeviceId,
+    required this.chat,
+    required this.sendText,
+    required this.connected,
   });
 
   @override
-  State<ChatPage> createState() => _ChatPageState();
+  State<PrivateChatPage> createState() => _PrivateChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
-  final TextEditingController messageController = TextEditingController();
-  final ScrollController chatScrollController = ScrollController();
-  final List<ChatMessage> messages = [];
-
-  BluetoothCharacteristic? txCharacteristic;
-  StreamSubscription<List<int>>? notificationSubscription;
-
-  final AudioRecorder _recorder = AudioRecorder();
-  final Map<int, _IncomingVoiceMessage> _incomingVoiceMessages = {};
-  final Map<int, AudioPlayer> _players = {};
-
-  bool isConnected = true;
-  bool isSending = false;
-  bool isRecording = false;
-  bool isVoiceSending = false;
-  int recordingSeconds = 0;
-  Timer? recordingTimer;
-  String? recordingPath;
-
-  static const int maxVoiceSeconds = 5;
-  static const int voiceBitRate = 16000;
-  static const int voiceSampleRate = 16000;
-  static const int interPacketDelayMs = 25;
-
-  final Guid txUuid = Guid(
-    '6E400003-B5A3-F393-E0A9-E50E24DCCA9E',
-  );
+class _PrivateChatPageState extends State<PrivateChatPage> {
+  final controller = TextEditingController();
+  final scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
-    setupNotifications();
+    widget.chat.addListener(_onChatUpdated);
   }
 
-  Future<void> setupNotifications() async {
-    try {
-      debugPrint('CHAT: discovering services...');
-      final services = await widget.device.discoverServices();
-
-      for (final service in services) {
-        for (final characteristic in service.characteristics) {
-          if (characteristic.uuid == txUuid) {
-            txCharacteristic = characteristic;
-            break;
-          }
-        }
-      }
-
-      if (txCharacteristic == null) {
-        debugPrint('CHAT: TX characteristic not found');
-        return;
-      }
-
-      await notificationSubscription?.cancel();
-      notificationSubscription = txCharacteristic!.onValueReceived.listen(
-        handleIncomingBleData,
-        onError: (error) {
-          debugPrint('Notification error: $error');
-        },
-        cancelOnError: false,
-      );
-
-      await txCharacteristic!.setNotifyValue(true);
-      debugPrint('CHAT: notifications ENABLED');
-    } catch (e, stackTrace) {
-      debugPrint('CHAT notification setup error: $e');
-      debugPrint(stackTrace.toString());
-    }
-  }
-
-  void handleIncomingBleData(List<int> value) {
-    if (value.isEmpty) return;
-
-    // Voice packets are binary. Check them before attempting UTF-8 decoding.
-    final voicePacket = VoicePacket.decode(value);
-    if (voicePacket != null) {
-      _handleIncomingVoicePacket(voicePacket);
-      return;
-    }
-
-    final message = utf8.decode(value, allowMalformed: true).trim();
-    if (message.isEmpty) return;
-
-    debugPrint('CHAT BLE DATA RECEIVED: $message');
-
-    final locationPacket = LocationPacket.parse(message);
-    if (locationPacket != null) {
-      debugPrint('CHAT: Location packet ignored here.');
-      return;
-    }
-
+  void _onChatUpdated() {
     if (!mounted) return;
-    setState(() {
-      messages.add(
-        ChatMessage(
-          text: message,
-          fromMe: false,
-          time: DateTime.now(),
-        ),
-      );
-    });
-    scrollChatToBottom();
-  }
-
-  void _handleIncomingVoicePacket(VoicePacket packet) async {
-    final existing = _incomingVoiceMessages[packet.messageId];
-    final transfer = existing ?? _IncomingVoiceMessage(packet.totalChunks);
-
-    if (transfer.totalChunks != packet.totalChunks) {
-      debugPrint('VOICE: total chunk mismatch for ${packet.messageId}');
-      _incomingVoiceMessages.remove(packet.messageId);
-      return;
-    }
-
-    transfer.chunks[packet.chunkIndex] = packet.payload;
-    _incomingVoiceMessages[packet.messageId] = transfer;
-
-    debugPrint(
-      'VOICE RX: message=${packet.messageId} '
-          'chunk=${packet.chunkIndex + 1}/${packet.totalChunks}',
-    );
-
-    if (!transfer.complete) return;
-
-    try {
-      final bytes = transfer.assemble();
-      final directory = await getApplicationDocumentsDirectory();
-      final voiceDirectory = Directory('${directory.path}/voice_messages');
-      await voiceDirectory.create(recursive: true);
-
-      final file = File(
-        '${voiceDirectory.path}/voice_${packet.messageId}.m4a',
-      );
-      await file.writeAsBytes(bytes, flush: true);
-
-      _incomingVoiceMessages.remove(packet.messageId);
-
-      if (!mounted) return;
-      setState(() {
-        messages.add(
-          ChatMessage(
-            text: 'Voice message',
-            fromMe: false,
-            time: DateTime.now(),
-            type: ChatMessageType.voice,
-            audioPath: file.path,
-          ),
-        );
-      });
-      scrollChatToBottom();
-      debugPrint('VOICE RX COMPLETE: ${file.path}');
-    } catch (e) {
-      debugPrint('VOICE RX REASSEMBLY ERROR: $e');
-      _incomingVoiceMessages.remove(packet.messageId);
-    }
-  }
-
-  Future<void> sendChatMessage(String message) async {
-    message = message.trim();
-    if (message.isEmpty || !isConnected || isSending || isVoiceSending) return;
-
-    setState(() => isSending = true);
-
-    try {
-      await widget.rxCharacteristic.write(
-        utf8.encode(message),
-        withoutResponse: false,
-      );
-
-      if (!mounted) return;
-      setState(() {
-        messages.add(
-          ChatMessage(
-            text: message,
-            fromMe: true,
-            time: DateTime.now(),
-          ),
-        );
-        messageController.clear();
-        isSending = false;
-      });
-      scrollChatToBottom();
-    } catch (e) {
-      debugPrint('SEND ERROR: $e');
-      if (!mounted) return;
-      setState(() => isSending = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send message')),
-      );
-    }
-  }
-
-  Future<void> startVoiceRecording() async {
-    if (!isConnected || isSending || isVoiceSending || isRecording) return;
-
-    try {
-      final hasPermission = await _recorder.hasPermission();
-      if (!hasPermission) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Microphone permission is required')),
-        );
-        return;
-      }
-
-      final directory = await getApplicationDocumentsDirectory();
-      final voiceDirectory = Directory('${directory.path}/voice_messages');
-      await voiceDirectory.create(recursive: true);
-
-      final id = DateTime.now().microsecondsSinceEpoch;
-      final path = '${voiceDirectory.path}/recording_$id.m4a';
-
-      final config = RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        bitRate: voiceBitRate,
-        sampleRate: voiceSampleRate,
-        numChannels: 1,
-      );
-
-      await _recorder.start(config, path: path);
-
-      if (!mounted) return;
-      setState(() {
-        isRecording = true;
-        recordingSeconds = 0;
-        recordingPath = path;
-      });
-
-      recordingTimer?.cancel();
-      recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) async {
-        if (!mounted || !isRecording) return;
-        setState(() => recordingSeconds++);
-        if (recordingSeconds >= maxVoiceSeconds) {
-          await stopVoiceRecordingAndSend();
-        }
-      });
-    } catch (e, stackTrace) {
-      debugPrint('VOICE RECORD START ERROR: $e');
-      debugPrint(stackTrace.toString());
-      recordingTimer?.cancel();
-      if (mounted) {
-        setState(() {
-          isRecording = false;
-          recordingSeconds = 0;
-          recordingPath = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not start recording: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> cancelVoiceRecording() async {
-    if (!isRecording) return;
-    recordingTimer?.cancel();
-    recordingTimer = null;
-
-    final path = recordingPath;
-    try {
-      await _recorder.cancel();
-      if (path != null) {
-        final file = File(path);
-        if (await file.exists()) await file.delete();
-      }
-    } catch (e) {
-      debugPrint('VOICE CANCEL ERROR: $e');
-    }
-
-    if (!mounted) return;
-    setState(() {
-      isRecording = false;
-      recordingSeconds = 0;
-      recordingPath = null;
-    });
-  }
-
-  Future<void> stopVoiceRecordingAndSend() async {
-    if (!isRecording) return;
-
-    recordingTimer?.cancel();
-    recordingTimer = null;
-
-    final path = recordingPath;
-
-    if (mounted) {
-      setState(() => isRecording = false);
-    }
-
-    try {
-      final recordedPath = await _recorder.stop();
-      final finalPath = recordedPath ?? path;
-
-      if (finalPath == null) {
-        throw Exception('Recorder did not return an audio file');
-      }
-
-      final file = File(finalPath);
-      if (!await file.exists()) {
-        throw Exception('Recorded audio file does not exist');
-      }
-
-      final bytes = await file.readAsBytes();
-      if (bytes.isEmpty) {
-        throw Exception('Recorded audio file is empty');
-      }
-
-      debugPrint('VOICE: compressed file size = ${bytes.length} bytes');
-      await _sendVoiceBytes(bytes);
-    } catch (e, stackTrace) {
-      debugPrint('VOICE RECORD/ SEND ERROR: $e');
-      debugPrint(stackTrace.toString());
-      if (mounted) {
-        setState(() {
-          isVoiceSending = false;
-          recordingSeconds = 0;
-          recordingPath = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Voice message failed: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _sendVoiceBytes(List<int> audioBytes) async {
-    if (!isConnected) return;
-
-    setState(() {
-      isVoiceSending = true;
-      recordingSeconds = 0;
-    });
-
-    final messageId = Random.secure().nextInt(0x7FFFFFFF);
-    final totalChunks = (audioBytes.length + VoicePacket.maxPayload - 1) ~/
-        VoicePacket.maxPayload;
-
-    debugPrint(
-      'VOICE TX START: id=$messageId size=${audioBytes.length} '
-          'chunks=$totalChunks',
-    );
-
-    try {
-      for (var index = 0; index < totalChunks; index++) {
-        final start = index * VoicePacket.maxPayload;
-        final end = min(start + VoicePacket.maxPayload, audioBytes.length);
-        final payload = audioBytes.sublist(start, end);
-
-        var flags = 0;
-        if (index == 0) flags |= 0x01;
-        if (index == totalChunks - 1) flags |= 0x02;
-
-        final packet = VoicePacket(
-          messageId: messageId,
-          chunkIndex: index,
-          totalChunks: totalChunks,
-          flags: flags,
-          payload: payload,
-        );
-
-        final encoded = packet.encode();
-        debugPrint(
-          'VOICE TX: ${index + 1}/$totalChunks '
-              'bytes=${encoded.length}',
-        );
-
-        // ESP32 must forward these bytes unchanged. It does not decode them.
-        await widget.rxCharacteristic.write(
-          encoded,
-          withoutResponse: false,
-        );
-
-        if (interPacketDelayMs > 0) {
-          await Future.delayed(
-            const Duration(milliseconds: interPacketDelayMs),
-          );
-        }
-      }
-
-      final directory = await getApplicationDocumentsDirectory();
-      final voiceDirectory = Directory('${directory.path}/voice_messages');
-      await voiceDirectory.create(recursive: true);
-      final localCopy = File(
-        '${voiceDirectory.path}/sent_$messageId.m4a',
-      );
-      await localCopy.writeAsBytes(audioBytes, flush: true);
-
-      if (!mounted) return;
-      setState(() {
-        messages.add(
-          ChatMessage(
-            text: 'Voice message',
-            fromMe: true,
-            time: DateTime.now(),
-            type: ChatMessageType.voice,
-            audioPath: localCopy.path,
-          ),
-        );
-        isVoiceSending = false;
-        recordingSeconds = 0;
-        recordingPath = null;
-      });
-      scrollChatToBottom();
-      debugPrint('VOICE TX COMPLETE: id=$messageId');
-    } catch (e, stackTrace) {
-      debugPrint('VOICE TX ERROR: $e');
-      debugPrint(stackTrace.toString());
-      if (mounted) {
-        setState(() {
-          isVoiceSending = false;
-          recordingSeconds = 0;
-          recordingPath = null;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to send voice message: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> playVoice(ChatMessage message) async {
-    final path = message.audioPath;
-    if (path == null) return;
-
-    try {
-      final player = _players.putIfAbsent(message.time.microsecondsSinceEpoch, () {
-        return AudioPlayer();
-      });
-      await player.play(DeviceFileSource(path));
-    } catch (e) {
-      debugPrint('VOICE PLAY ERROR: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not play voice message')),
-        );
-      }
-    }
-  }
-
-  Future<void> disconnectFromChat() async {
-    await notificationSubscription?.cancel();
-    notificationSubscription = null;
-    recordingTimer?.cancel();
-
-    if (isRecording) {
-      try {
-        await _recorder.cancel();
-      } catch (_) {}
-    }
-
-    try {
-      await widget.device.disconnect();
-    } catch (e) {
-      debugPrint('Disconnect error: $e');
-    }
-
-    if (!mounted) return;
-    setState(() => isConnected = false);
-    Navigator.of(context).pop();
-  }
-
-  void scrollChatToBottom() {
+    setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!chatScrollController.hasClients) return;
-      chatScrollController.animateTo(
-        chatScrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
+      if (scrollController.hasClients) {
+        scrollController.animateTo(
+          scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
-  String formatTime(DateTime time) {
-    final hour = time.hour.toString().padLeft(2, '0');
-    final minute = time.minute.toString().padLeft(2, '0');
-    return '$hour:$minute';
-  }
-
-  @override
-  void dispose() {
-    recordingTimer?.cancel();
-    notificationSubscription?.cancel();
-    messageController.dispose();
-    chatScrollController.dispose();
-    _recorder.dispose();
-    for (final player in _players.values) {
-      player.dispose();
-    }
-    super.dispose();
+  Future<void> _send() async {
+    final text = controller.text.trim();
+    if (text.isEmpty || !widget.connected) return;
+    await widget.sendText(text);
+    controller.clear();
   }
 
   @override
   Widget build(BuildContext context) {
-    final canType = isConnected && !isSending && !isVoiceSending && !isRecording;
+    final messages = widget.chat.messages;
 
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Back',
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        titleSpacing: 0,
         title: Row(
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF4FC),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(
-                Icons.developer_board,
-                size: 19,
-                color: Color(0xFF1769E0),
-              ),
-            ),
-            const SizedBox(width: 10),
+            const Icon(Icons.router_rounded, size: 20),
+            const SizedBox(width: 8),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.device.platformName.isNotEmpty
-                        ? widget.device.platformName
-                        : 'ESP32 Device',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Colors.green,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      const Text(
-                        'Connected',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Color(0xFF6D7787),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              child: Text(
+                widget.node.id,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Center(
+              child: Text(
+                widget.node.rssi == null
+                    ? 'RSSI N/A'
+                    : '${widget.node.rssi} dBm',
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(
-                bottom: BorderSide(color: Color(0xFFE8ECF1)),
-              ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 9,
             ),
+            color: const Color(0xFFF5F7FA),
             child: Text(
-              widget.device.remoteId.toString(),
+              'Private chat • ${widget.node.id}',
               style: const TextStyle(
-                fontSize: 10,
-                color: Color(0xFF8993A2),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF6D7787),
               ),
             ),
           ),
-          if (isVoiceSending)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: const Color(0xFFEFF4FC),
-              child: Row(
-                children: [
-                  const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      'Sending voice message...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF1769E0),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
           Expanded(
             child: messages.isEmpty
-                ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 58,
-                    height: 58,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF4FC),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: const Icon(
-                      Icons.chat_bubble_outline,
-                      size: 28,
-                      color: Color(0xFF1769E0),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'No messages yet',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF697487),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Send a text or voice message',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Color(0xFF9AA3B1),
-                    ),
-                  ),
-                ],
+                ? const Center(
+              child: Text(
+                'No private messages yet',
+                style: TextStyle(color: Color(0xFF8A94A4)),
               ),
             )
                 : ListView.builder(
-              controller: chatScrollController,
-              padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
+              controller: scrollController,
+              padding: const EdgeInsets.all(12),
               itemCount: messages.length,
-              itemBuilder: (context, index) {
-                final message = messages[index];
-                return _ChatBubble(
-                  message: message,
-                  time: formatTime(message.time),
-                  onPlay: message.isVoice
-                      ? () => playVoice(message)
-                      : null,
-                );
+              itemBuilder: (_, index) {
+                final m = messages[index];
+                return _MessageBubble(message: m);
               },
             ),
           ),
-          SafeArea(
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(
-                  top: BorderSide(color: Color(0xFFE8ECF1)),
+          _Composer(
+            controller: controller,
+            enabled: widget.connected,
+            onSend: _send,
+            onVoiceTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Voice messages need sender/recipient routing info, which will '
+                        'be added with the ESP32 firmware update. Voice is available '
+                        'in Common Chat for now.',
+                  ),
                 ),
-              ),
-              child: isRecording
-                  ? Row(
-                children: [
-                  IconButton(
-                    tooltip: 'Cancel',
-                    onPressed: cancelVoiceRecording,
-                    icon: const Icon(Icons.delete_outline_rounded),
-                  ),
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFFF1F1),
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.mic_rounded,
-                            color: Color(0xFFE53935),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Recording 0:0${recordingSeconds.clamp(0, 9)} / 0:05',
-                              style: const TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFFC62828),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: FilledButton(
-                      onPressed: stopVoiceRecordingAndSend,
-                      style: FilledButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        backgroundColor: const Color(0xFFE53935),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      child: const Icon(Icons.send_rounded, size: 21),
-                    ),
-                  ),
-                ],
-              )
-                  : Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: messageController,
-                      enabled: canType,
-                      minLines: 1,
-                      maxLines: 4,
-                      textInputAction: TextInputAction.newline,
-                      decoration: const InputDecoration(
-                        hintText: 'Type a message...',
-                        hintStyle: TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF9AA3B1),
-                        ),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 15,
-                          vertical: 11,
-                        ),
-                      ),
-                      onSubmitted: sendChatMessage,
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  SizedBox(
-                    width: 45,
-                    height: 45,
-                    child: OutlinedButton(
-                      onPressed: canType ? startVoiceRecording : null,
-                      style: OutlinedButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        side: const BorderSide(color: Color(0xFFD7DEE8)),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                      ),
-                      child: const Icon(Icons.mic_none_rounded, size: 21),
-                    ),
-                  ),
-                  const SizedBox(width: 7),
-                  SizedBox(
-                    width: 45,
-                    height: 45,
-                    child: FilledButton(
-                      onPressed: canType
-                          ? () => sendChatMessage(messageController.text)
-                          : null,
-                      style: FilledButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                      ),
-                      child: isSending
-                          ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                          : const Icon(Icons.send_rounded, size: 20),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+              );
+            },
           ),
         ],
       ),
     );
   }
+
+  @override
+  void dispose() {
+    widget.chat.removeListener(_onChatUpdated);
+    controller.dispose();
+    scrollController.dispose();
+    super.dispose();
+  }
 }
 
 // ============================================================
-// CHAT BUBBLE
+// COMMON CHAT
 // ============================================================
 
-class _ChatBubble extends StatelessWidget {
-  final ChatMessage message;
-  final String time;
-  final VoidCallback? onPlay;
+class CommonChatPage extends StatefulWidget {
+  final String mobileDeviceId;
+  final ChatNotifier chat;
+  final Future<void> Function(String) sendText;
+  final VoidCallback onVoiceHoldStart;
+  final VoidCallback onVoiceHoldEnd;
+  final bool connected;
 
-  const _ChatBubble({
-    required this.message,
-    required this.time,
-    this.onPlay,
+  const CommonChatPage({
+    super.key,
+    required this.mobileDeviceId,
+    required this.chat,
+    required this.sendText,
+    required this.onVoiceHoldStart,
+    required this.onVoiceHoldEnd,
+    required this.connected,
   });
 
   @override
+  State<CommonChatPage> createState() => _CommonChatPageState();
+}
+
+class _CommonChatPageState extends State<CommonChatPage> {
+  final controller = TextEditingController();
+  final scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.chat.addListener(_onChatUpdated);
+  }
+
+  void _onChatUpdated() {
+    if (!mounted) return;
+    setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scrollController.hasClients) {
+        scrollController.animateTo(
+          scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  Future<void> _send() async {
+    final text = controller.text.trim();
+    if (text.isEmpty || !widget.connected) return;
+    await widget.sendText(text);
+    controller.clear();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final messages = widget.chat.messages;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Common Chat'),
+        actions: const [
+          Padding(
+            padding: EdgeInsets.only(right: 14),
+            child: Icon(Icons.public_rounded),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 10,
+            ),
+            color: const Color(0xFFF5F7FA),
+            child: const Text(
+              'Messages from all LoRa nodes',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF6D7787),
+              ),
+            ),
+          ),
+          Expanded(
+            child: messages.isEmpty
+                ? const Center(
+              child: Text(
+                'No common messages yet',
+                style: TextStyle(color: Color(0xFF8A94A4)),
+              ),
+            )
+                : ListView.builder(
+              controller: scrollController,
+              padding: const EdgeInsets.all(12),
+              itemCount: messages.length,
+              itemBuilder: (_, index) {
+                final m = messages[index];
+                return Column(
+                  crossAxisAlignment: m.fromMe
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
+                  children: [
+                    if (!m.fromMe)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          left: 4,
+                          bottom: 3,
+                        ),
+                        child: Text(
+                          m.senderId,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF697487),
+                          ),
+                        ),
+                      ),
+                    _MessageBubble(message: m),
+                  ],
+                );
+              },
+            ),
+          ),
+          _Composer(
+            controller: controller,
+            enabled: widget.connected,
+            onSend: _send,
+            onVoiceHoldStart: widget.onVoiceHoldStart,
+            onVoiceHoldEnd: widget.onVoiceHoldEnd,
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.chat.removeListener(_onChatUpdated);
+    controller.dispose();
+    scrollController.dispose();
+    super.dispose();
+  }
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+class NotificationPage extends StatelessWidget {
+  final List<AppNotification> notifications;
+  final void Function(AppNotification) onOpen;
+
+  const NotificationPage({
+    super.key,
+    required this.notifications,
+    required this.onOpen,
+  });
+
+  String _time(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:'
+          '${t.minute.toString().padLeft(2, '0')}';
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notifications'),
+      ),
+      body: notifications.isEmpty
+          ? const Center(
+        child: Text(
+          'No notifications',
+          style: TextStyle(color: Color(0xFF8A94A4)),
+        ),
+      )
+          : ListView.separated(
+        padding: const EdgeInsets.all(12),
+        itemCount: notifications.length,
+        separatorBuilder: (_, __) => const SizedBox(height: 8),
+        itemBuilder: (_, index) {
+          final n = notifications[index];
+          return ListTile(
+            onTap: () => onOpen(n),
+            tileColor: n.read
+                ? Colors.white
+                : const Color(0xFFEFF4FC),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: const BorderSide(
+                color: Color(0xFFE4E9EF),
+              ),
+            ),
+            leading: CircleAvatar(
+              backgroundColor: const Color(0xFFE7F0FF),
+              child: Icon(
+                n.isPrivate
+                    ? Icons.chat_bubble_rounded
+                    : Icons.forum_rounded,
+                color: const Color(0xFF1769E0),
+              ),
+            ),
+            title: Text(
+              n.isPrivate
+                  ? 'Private message from ${n.senderId}'
+                  : 'Common message from ${n.senderId}',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            subtitle: Text(
+              n.preview,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: Text(
+              _time(n.time),
+              style: const TextStyle(
+                fontSize: 10,
+                color: Color(0xFF8A94A4),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ============================================================
+// MESSAGE BUBBLE
+// ============================================================
+
+class _MessageBubble extends StatefulWidget {
+  final ChatMessage message;
+
+  const _MessageBubble({required this.message});
+
+  @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _isPlaying = false;
+  StreamSubscription<void>? _completeSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _completeSubscription = _player.onPlayerComplete.listen((_) {
+      if (mounted) setState(() => _isPlaying = false);
+    });
+  }
+
+  Future<void> _togglePlayback() async {
+    final path = widget.message.audioPath;
+    if (path == null) return;
+
+    try {
+      if (_isPlaying) {
+        await _player.pause();
+        if (mounted) setState(() => _isPlaying = false);
+      } else {
+        await _player.play(DeviceFileSource(path));
+        if (mounted) setState(() => _isPlaying = true);
+      }
+    } catch (e) {
+      debugPrint('VOICE PLAYBACK ERROR: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _completeSubscription?.cancel();
+    _player.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final message = widget.message;
+
     return Align(
-      alignment: message.fromMe ? Alignment.centerRight : Alignment.centerLeft,
+      alignment:
+      message.fromMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.76,
+          maxWidth: MediaQuery.of(context).size.width * 0.78,
         ),
         margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.fromLTRB(12, 9, 10, 7),
+        padding: const EdgeInsets.fromLTRB(12, 9, 12, 8),
         decoration: BoxDecoration(
-          color: message.fromMe ? const Color(0xFF1769E0) : Colors.white,
+          color: message.fromMe
+              ? const Color(0xFF1769E0)
+              : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: message.fromMe
               ? null
               : Border.all(color: const Color(0xFFE3E8EF)),
         ),
-        child: message.isVoice
-            ? Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Material(
-              color: message.fromMe
-                  ? Colors.white.withOpacity(0.16)
-                  : const Color(0xFFEFF4FC),
-              shape: const CircleBorder(),
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: onPlay,
-                child: Padding(
-                  padding: const EdgeInsets.all(9),
-                  child: Icon(
-                    Icons.play_arrow_rounded,
-                    size: 24,
-                    color: message.fromMe
-                        ? Colors.white
-                        : const Color(0xFF1769E0),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 9),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Voice message',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: message.fromMe
-                        ? Colors.white
-                        : const Color(0xFF273142),
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Tap to play',
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: message.fromMe
-                        ? Colors.white70
-                        : const Color(0xFF929BA9),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 10),
-            Text(
-              time,
-              style: TextStyle(
-                fontSize: 9,
-                color: message.fromMe
-                    ? Colors.white70
-                    : const Color(0xFF929BA9),
-              ),
-            ),
-          ],
-        )
-            : Column(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
+            if (message.isVoice)
+              GestureDetector(
+                onTap: _togglePlayback,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      _isPlaying
+                          ? Icons.pause_circle_filled_rounded
+                          : Icons.play_circle_fill_rounded,
+                      size: 26,
+                      color: message.fromMe
+                          ? Colors.white
+                          : const Color(0xFF1769E0),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Voice message',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: message.fromMe
+                            ? Colors.white
+                            : const Color(0xFF273142),
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Text(
                 message.text,
                 style: TextStyle(
                   fontSize: 14,
-                  height: 1.35,
                   color: message.fromMe
                       ? Colors.white
                       : const Color(0xFF273142),
                 ),
               ),
-            ),
             const SizedBox(height: 3),
             Text(
-              time,
+              '${message.time.hour.toString().padLeft(2, '0')}:'
+                  '${message.time.minute.toString().padLeft(2, '0')}',
               style: TextStyle(
                 fontSize: 9,
                 color: message.fromMe
@@ -3981,3 +3351,146 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
+// ============================================================
+// COMPOSER
+// ============================================================
+
+class _Composer extends StatefulWidget {
+  final TextEditingController controller;
+  final bool enabled;
+  final Future<void> Function() onSend;
+
+  // Tap-to-see-info mode (used by Private Chat until voice routing exists).
+  final VoidCallback? onVoiceTap;
+
+  // Press-and-hold-to-record mode (used by Common Chat).
+  final VoidCallback? onVoiceHoldStart;
+  final VoidCallback? onVoiceHoldEnd;
+
+  const _Composer({
+    required this.controller,
+    required this.enabled,
+    required this.onSend,
+    this.onVoiceTap,
+    this.onVoiceHoldStart,
+    this.onVoiceHoldEnd,
+  });
+
+  @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  bool _recording = false;
+
+  bool get _hasHoldRecording => widget.onVoiceHoldStart != null;
+
+  void _handleLongPressStart(LongPressStartDetails _) {
+    setState(() => _recording = true);
+    widget.onVoiceHoldStart?.call();
+  }
+
+  void _handleLongPressEnd(LongPressEndDetails _) {
+    setState(() => _recording = false);
+    widget.onVoiceHoldEnd?.call();
+  }
+
+  void _handleLongPressCancel() {
+    setState(() => _recording = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(
+            top: BorderSide(color: Color(0xFFE8ECF1)),
+          ),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Expanded(
+              child: TextField(
+                controller: widget.controller,
+                enabled: widget.enabled,
+                minLines: 1,
+                maxLines: 4,
+                textInputAction: TextInputAction.newline,
+                decoration: InputDecoration(
+                  hintText: _recording
+                      ? 'Recording... release to send'
+                      : 'Type a message...',
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 15,
+                    vertical: 11,
+                  ),
+                ),
+                onSubmitted: (_) => widget.onSend(),
+              ),
+            ),
+            const SizedBox(width: 7),
+            GestureDetector(
+              onLongPressStart: (_hasHoldRecording && widget.enabled)
+                  ? _handleLongPressStart
+                  : null,
+              onLongPressEnd: (_hasHoldRecording && widget.enabled)
+                  ? _handleLongPressEnd
+                  : null,
+              onLongPressCancel: (_hasHoldRecording && widget.enabled)
+                  ? _handleLongPressCancel
+                  : null,
+              onTap: (!_hasHoldRecording && widget.enabled)
+                  ? widget.onVoiceTap
+                  : null,
+              child: Container(
+                width: 45,
+                height: 45,
+                decoration: BoxDecoration(
+                  color: _recording
+                      ? const Color(0xFFFFE7E7)
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: _recording
+                        ? const Color(0xFFD64545)
+                        : const Color(0xFFD7DEE8),
+                  ),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(
+                  _recording
+                      ? Icons.stop_circle_rounded
+                      : Icons.mic_none_rounded,
+                  size: 21,
+                  color: _recording
+                      ? const Color(0xFFD64545)
+                      : (widget.enabled
+                      ? const Color(0xFF273142)
+                      : const Color(0xFFB6BEC9)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 7),
+            SizedBox(
+              width: 45,
+              height: 45,
+              child: FilledButton(
+                onPressed: widget.enabled ? widget.onSend : null,
+                style: FilledButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                ),
+                child: const Icon(Icons.send_rounded, size: 20),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
