@@ -1324,7 +1324,18 @@ class _DevicePageState extends State<DevicePage> {
 
   // Voice messaging.
   final AudioRecorder _voiceRecorder = AudioRecorder();
+
+  // BLE voice framing buffer.
+  // One BLE notification may contain a partial frame, one complete frame,
+  // or several VoicePackets.
+  final List<int> _voiceRxBuffer = <int>[];
+  Timer? _voiceRxBufferTimer;
+
   final Map<int, _IncomingVoiceMessage> _incomingVoiceMessages = {};
+  final Map<int, Timer> _incomingVoiceTimeouts = {};
+
+  // Voice recording UI state.
+  bool _isVoiceRecording = false;
 
   int get unreadNotifications =>
       notifications.where((n) => !n.read).length;
@@ -1654,13 +1665,134 @@ class _DevicePageState extends State<DevicePage> {
   void handleIncomingBleData(List<int> value) {
     if (value.isEmpty) return;
 
-    final voicePacket = VoicePacket.decode(value);
-    if (voicePacket != null) {
-      _handleIncomingVoicePacket(voicePacket);
-      return;
+    // IMPORTANT:
+    // Never call VoicePacket.decode(value) directly. One BLE notification
+    // may contain a partial frame, one complete frame, or several frames.
+    _voiceRxBuffer.addAll(value);
+    _processIncomingBleBuffer();
+  }
+
+  int _findMagic(List<int> data, int start) {
+    if (data.length < VoicePacket.magic.length) return -1;
+
+    for (var i = start; i <= data.length - VoicePacket.magic.length; i++) {
+      var match = true;
+      for (var j = 0; j < VoicePacket.magic.length; j++) {
+        if (data[i + j] != VoicePacket.magic[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    return -1;
+  }
+
+  int _magicSuffixLength(List<int> data) {
+    final maxKeep = min(VoicePacket.magic.length - 1, data.length);
+
+    for (var len = maxKeep; len > 0; len--) {
+      var match = true;
+      final start = data.length - len;
+
+      for (var i = 0; i < len; i++) {
+        if (data[start + i] != VoicePacket.magic[i]) {
+          match = false;
+          break;
+        }
+      }
+
+      if (match) return len;
     }
 
-    final message = utf8.decode(value, allowMalformed: true).trim();
+    return 0;
+  }
+
+  void _processIncomingBleBuffer() {
+    while (_voiceRxBuffer.isNotEmpty) {
+      final magicIndex = _findMagic(_voiceRxBuffer, 0);
+
+      // No complete VOIC marker yet. Process ordinary text, while keeping
+      // a possible partial VOIC marker at the end.
+      if (magicIndex < 0) {
+        final keep = _magicSuffixLength(_voiceRxBuffer);
+        final textLength = _voiceRxBuffer.length - keep;
+
+        if (textLength > 0) {
+          final textBytes = _voiceRxBuffer.sublist(0, textLength);
+          _voiceRxBuffer.removeRange(0, textLength);
+          _processIncomingTextBytes(textBytes);
+          continue;
+        }
+
+        _armVoiceRxBufferTimeout();
+        return;
+      }
+
+      // Bytes before VOIC are normal text/protocol data.
+      if (magicIndex > 0) {
+        final prefix = _voiceRxBuffer.sublist(0, magicIndex);
+        _voiceRxBuffer.removeRange(0, magicIndex);
+        _processIncomingTextBytes(prefix);
+        continue;
+      }
+
+      // We are exactly at VOIC. Wait for the complete fixed header.
+      if (_voiceRxBuffer.length < VoicePacket.headerSize) {
+        _armVoiceRxBufferTimeout();
+        return;
+      }
+
+      if (_voiceRxBuffer[4] != VoicePacket.version) {
+        debugPrint('VOICE RX: invalid version; resynchronizing');
+        _voiceRxBuffer.removeAt(0);
+        continue;
+      }
+
+      final payloadLength =
+      (_voiceRxBuffer[14] << 8) | _voiceRxBuffer[15];
+
+      if (payloadLength > VoicePacket.maxPayload) {
+        debugPrint(
+          'VOICE RX: invalid payload length $payloadLength; resynchronizing',
+        );
+        _voiceRxBuffer.removeAt(0);
+        continue;
+      }
+
+      final expectedLength =
+          VoicePacket.headerSize + payloadLength + VoicePacket.crcSize;
+
+      // Header says more bytes are needed. Keep buffering.
+      if (_voiceRxBuffer.length < expectedLength) {
+        _armVoiceRxBufferTimeout();
+        return;
+      }
+
+      final frame = List<int>.from(
+        _voiceRxBuffer.sublist(0, expectedLength),
+      );
+      _voiceRxBuffer.removeRange(0, expectedLength);
+
+      final voicePacket = VoicePacket.decode(frame);
+
+      if (voicePacket != null) {
+        _cancelVoiceRxBufferTimeout();
+        _handleIncomingVoicePacket(voicePacket);
+      } else {
+        // A failed binary voice frame must NEVER fall through to text.
+        debugPrint('VOICE RX: invalid frame/CRC; resynchronizing');
+        continue;
+      }
+    }
+
+    _cancelVoiceRxBufferTimeout();
+  }
+
+  void _processIncomingTextBytes(List<int> bytes) {
+    if (bytes.isEmpty) return;
+
+    final message = utf8.decode(bytes, allowMalformed: true).trim();
     if (message.isEmpty) return;
 
     final locationPacket = LocationPacket.parse(message);
@@ -1685,8 +1817,26 @@ class _DevicePageState extends State<DevicePage> {
       return;
     }
 
-    // Backward-compatible raw message handling.
+    // Only genuine text reaches the raw-text fallback.
     _handleRawIncomingMessage(message);
+  }
+
+  void _armVoiceRxBufferTimeout() {
+    _voiceRxBufferTimer?.cancel();
+    _voiceRxBufferTimer = Timer(const Duration(seconds: 10), () {
+      if (_voiceRxBuffer.isNotEmpty) {
+        debugPrint(
+          'VOICE RX: incomplete frame timed out; clearing '
+              '${_voiceRxBuffer.length} buffered bytes',
+        );
+        _voiceRxBuffer.clear();
+      }
+    });
+  }
+
+  void _cancelVoiceRxBufferTimeout() {
+    _voiceRxBufferTimer?.cancel();
+    _voiceRxBufferTimer = null;
   }
 
   void _handleRoutedMessage(ParsedRoutingPacket packet) {
@@ -1900,7 +2050,9 @@ class _DevicePageState extends State<DevicePage> {
   // the existing fallback behavior used for unrouted raw text.
   // ----------------------------------------------------------
 
-  Future<void> _startVoiceRecording() async {
+  Future<void> _startVoiceRecording({String? privateTarget}) async {
+    if (_isVoiceRecording) return;
+
     try {
       final hasPermission = await _voiceRecorder.hasPermission();
       if (!hasPermission) {
@@ -1920,13 +2072,19 @@ class _DevicePageState extends State<DevicePage> {
         ),
         path: path,
       );
+
+      _isVoiceRecording = true;
     } catch (e) {
       debugPrint('VOICE RECORD START ERROR: $e');
       _showSnack('Could not start recording');
     }
   }
 
-  Future<void> _stopVoiceRecordingAndSend() async {
+  Future<void> _stopVoiceRecordingAndSend({String? privateTarget}) async {
+    if (!_isVoiceRecording) return;
+
+    _isVoiceRecording = false;
+
     try {
       final path = await _voiceRecorder.stop();
       if (path == null) return;
@@ -1942,7 +2100,11 @@ class _DevicePageState extends State<DevicePage> {
         return;
       }
 
-      await _sendVoiceBytes(bytes, localAudioPath: path);
+      await _sendVoiceBytes(
+        bytes,
+        localAudioPath: path,
+        privateTarget: privateTarget,
+      );
     } catch (e) {
       debugPrint('VOICE RECORD STOP ERROR: $e');
       _showSnack('Failed to send voice message');
@@ -1952,6 +2114,7 @@ class _DevicePageState extends State<DevicePage> {
   Future<void> _sendVoiceBytes(
       List<int> bytes, {
         required String localAudioPath,
+        String? privateTarget,
       }) async {
     // 32-bit message id, derived from the clock -- good enough to avoid
     // collisions between consecutive voice messages from this phone.
@@ -1979,20 +2142,27 @@ class _DevicePageState extends State<DevicePage> {
 
         // Small pacing delay so the ESP32's BLE stack isn't flooded --
         // tune/remove once the firmware side is confirmed to keep up.
-        await Future.delayed(const Duration(milliseconds: 15));
+        await Future.delayed(const Duration(milliseconds: 5));
       }
 
-      commonChat.add(
-        ChatMessage(
-          id: '$messageId',
-          senderId: mobileDeviceId,
-          text: '',
-          fromMe: true,
-          time: DateTime.now(),
-          type: ChatMessageType.voice,
-          audioPath: localAudioPath,
-        ),
+      final localMessage = ChatMessage(
+        id: '$messageId',
+        senderId: mobileDeviceId,
+        recipientId: privateTarget,
+        text: '',
+        fromMe: true,
+        time: DateTime.now(),
+        type: ChatMessageType.voice,
+        audioPath: localAudioPath,
       );
+
+      if (privateTarget != null) {
+        privateChats
+            .putIfAbsent(privateTarget, () => ChatNotifier())
+            .add(localMessage);
+      } else {
+        commonChat.add(localMessage);
+      }
     } catch (e) {
       debugPrint('VOICE SEND ERROR: $e');
       _showSnack('Failed to send voice message');
@@ -2000,19 +2170,55 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   Future<void> _handleIncomingVoicePacket(VoicePacket packet) async {
+    final existing = _incomingVoiceMessages[packet.messageId];
+
+    // Do not allow an inconsistent packet to change the declared message size.
+    if (existing != null && existing.totalChunks != packet.totalChunks) {
+      debugPrint(
+        'VOICE ASSEMBLY: totalChunks changed for message '
+            '${packet.messageId}; resetting',
+      );
+      _incomingVoiceTimeouts.remove(packet.messageId)?.cancel();
+      _incomingVoiceMessages.remove(packet.messageId);
+    }
+
     final incoming = _incomingVoiceMessages.putIfAbsent(
       packet.messageId,
           () => _IncomingVoiceMessage(packet.totalChunks),
     );
 
-    incoming.chunks[packet.chunkIndex] = packet.payload;
+    incoming.chunks[packet.chunkIndex] = List<int>.from(packet.payload);
+
+    // Reset the timeout whenever a valid chunk arrives.
+    _incomingVoiceTimeouts.remove(packet.messageId)?.cancel();
+    _incomingVoiceTimeouts[packet.messageId] = Timer(
+      const Duration(seconds: 15),
+          () {
+        final removed = _incomingVoiceMessages.remove(packet.messageId);
+        _incomingVoiceTimeouts.remove(packet.messageId)?.cancel();
+
+        if (removed != null) {
+          debugPrint(
+            'VOICE ASSEMBLY TIMEOUT: message ${packet.messageId}, '
+                '${removed.chunks.length}/${removed.totalChunks} chunks received',
+          );
+        }
+      },
+    );
 
     if (!incoming.complete) return;
 
+    _incomingVoiceTimeouts.remove(packet.messageId)?.cancel();
     _incomingVoiceMessages.remove(packet.messageId);
 
     try {
       final bytes = incoming.assemble();
+
+      if (bytes.isEmpty) {
+        debugPrint('VOICE ASSEMBLE: empty audio for ${packet.messageId}');
+        return;
+      }
+
       final directory = await getApplicationDocumentsDirectory();
       final path = '${directory.path}/voice_in_${packet.messageId}.m4a';
       final file = File(path);
@@ -2035,9 +2241,11 @@ class _DevicePageState extends State<DevicePage> {
         preview: 'Voice message',
         isPrivate: false,
       );
+
       if (mounted) setState(() {});
-    } catch (e) {
+    } catch (e, stackTrace) {
       debugPrint('VOICE ASSEMBLE ERROR: $e');
+      debugPrint(stackTrace.toString());
     }
   }
 
@@ -2046,6 +2254,16 @@ class _DevicePageState extends State<DevicePage> {
     notificationSubscription = null;
     await connectionSubscription?.cancel();
     connectionSubscription = null;
+
+    _cancelVoiceRxBufferTimeout();
+    _voiceRxBuffer.clear();
+
+    for (final timer in _incomingVoiceTimeouts.values) {
+      timer.cancel();
+    }
+    _incomingVoiceTimeouts.clear();
+    _incomingVoiceMessages.clear();
+
     rxCharacteristic = null;
     txCharacteristic = null;
   }
@@ -2209,6 +2427,10 @@ class _DevicePageState extends State<DevicePage> {
           mobileDeviceId: mobileDeviceId,
           chat: privateChats.putIfAbsent(node.id, () => ChatNotifier()),
           sendText: (text) => sendPrivateText(node.id, text),
+          onVoiceHoldStart: () =>
+              _startVoiceRecording(privateTarget: node.id),
+          onVoiceHoldEnd: () =>
+              _stopVoiceRecordingAndSend(privateTarget: node.id),
           connected: connectedDevice != null && rxCharacteristic != null,
         ),
       ),
@@ -2769,6 +2991,12 @@ class _DevicePageState extends State<DevicePage> {
     scanSubscription?.cancel();
     connectionSubscription?.cancel();
     notificationSubscription?.cancel();
+    _cancelVoiceRxBufferTimeout();
+    for (final timer in _incomingVoiceTimeouts.values) {
+      timer.cancel();
+    }
+    _incomingVoiceTimeouts.clear();
+    _incomingVoiceMessages.clear();
     _offlineMapManager.dispose();
     _voiceRecorder.dispose();
     super.dispose();
@@ -2841,6 +3069,8 @@ class PrivateChatPage extends StatefulWidget {
   final String mobileDeviceId;
   final ChatNotifier chat;
   final Future<void> Function(String) sendText;
+  final Future<void> Function() onVoiceHoldStart;
+  final Future<void> Function() onVoiceHoldEnd;
   final bool connected;
 
   const PrivateChatPage({
@@ -2849,6 +3079,8 @@ class PrivateChatPage extends StatefulWidget {
     required this.mobileDeviceId,
     required this.chat,
     required this.sendText,
+    required this.onVoiceHoldStart,
+    required this.onVoiceHoldEnd,
     required this.connected,
   });
 
@@ -2959,17 +3191,8 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
             controller: controller,
             enabled: widget.connected,
             onSend: _send,
-            onVoiceTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Voice messages need sender/recipient routing info, which will '
-                        'be added with the ESP32 firmware update. Voice is available '
-                        'in Common Chat for now.',
-                  ),
-                ),
-              );
-            },
+            onVoiceHoldStart: widget.onVoiceHoldStart,
+            onVoiceHoldEnd: widget.onVoiceHoldEnd,
           ),
         ],
       ),
@@ -2993,8 +3216,8 @@ class CommonChatPage extends StatefulWidget {
   final String mobileDeviceId;
   final ChatNotifier chat;
   final Future<void> Function(String) sendText;
-  final VoidCallback onVoiceHoldStart;
-  final VoidCallback onVoiceHoldEnd;
+  final Future<void> Function() onVoiceHoldStart;
+  final Future<void> Function() onVoiceHoldEnd;
   final bool connected;
 
   const CommonChatPage({
@@ -3363,9 +3586,9 @@ class _Composer extends StatefulWidget {
   // Tap-to-see-info mode (used by Private Chat until voice routing exists).
   final VoidCallback? onVoiceTap;
 
-  // Press-and-hold-to-record mode (used by Common Chat).
-  final VoidCallback? onVoiceHoldStart;
-  final VoidCallback? onVoiceHoldEnd;
+  // Press-and-hold-to-record mode.
+  final Future<void> Function()? onVoiceHoldStart;
+  final Future<void> Function()? onVoiceHoldEnd;
 
   const _Composer({
     required this.controller,
@@ -3382,21 +3605,79 @@ class _Composer extends StatefulWidget {
 
 class _ComposerState extends State<_Composer> {
   bool _recording = false;
+  bool _sendingVoice = false;
+  Timer? _recordingTimer;
+  Duration _recordingDuration = Duration.zero;
 
   bool get _hasHoldRecording => widget.onVoiceHoldStart != null;
 
   void _handleLongPressStart(LongPressStartDetails _) {
-    setState(() => _recording = true);
+    if (!widget.enabled || _recording || _sendingVoice) return;
+
+    setState(() {
+      _recording = true;
+      _recordingDuration = Duration.zero;
+    });
+
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(
+      const Duration(seconds: 1),
+          (_) {
+        if (!mounted || !_recording) return;
+        setState(() {
+          _recordingDuration += const Duration(seconds: 1);
+        });
+      },
+    );
+
     widget.onVoiceHoldStart?.call();
   }
 
-  void _handleLongPressEnd(LongPressEndDetails _) {
-    setState(() => _recording = false);
-    widget.onVoiceHoldEnd?.call();
+  Future<void> _handleLongPressEnd(LongPressEndDetails _) async {
+    if (!_recording) return;
+
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+
+    setState(() {
+      _recording = false;
+      _sendingVoice = true;
+    });
+
+    try {
+      await widget.onVoiceHoldEnd?.call();
+    } finally {
+      if (mounted) {
+        setState(() {
+          _sendingVoice = false;
+          _recordingDuration = Duration.zero;
+        });
+      }
+    }
   }
 
   void _handleLongPressCancel() {
-    setState(() => _recording = false);
+    if (!_recording) return;
+
+    _recordingTimer?.cancel();
+    _recordingTimer = null;
+
+    setState(() {
+      _recording = false;
+      _recordingDuration = Duration.zero;
+    });
+  }
+
+  String _formatDuration(Duration duration) {
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  @override
+  void dispose() {
+    _recordingTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -3414,7 +3695,66 @@ class _ComposerState extends State<_Composer> {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Expanded(
-              child: TextField(
+              child: _recording || _sendingVoice
+                  ? Container(
+                height: 45,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                decoration: BoxDecoration(
+                  color: _sendingVoice
+                      ? const Color(0xFFF1F4F8)
+                      : const Color(0xFFFFF0F0),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: _sendingVoice
+                        ? const Color(0xFFD7DEE8)
+                        : const Color(0xFFFFB8B8),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _sendingVoice
+                          ? Icons.cloud_upload_rounded
+                          : Icons.mic_rounded,
+                      size: 19,
+                      color: _sendingVoice
+                          ? const Color(0xFF1769E0)
+                          : const Color(0xFFD64545),
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        _sendingVoice
+                            ? 'Sharing voice message...'
+                            : 'Recording voice • ${_formatDuration(_recordingDuration)}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _sendingVoice
+                              ? const Color(0xFF4C5666)
+                              : const Color(0xFFD64545),
+                        ),
+                      ),
+                    ),
+                    if (_recording)
+                      const Text(
+                        'Release to send',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Color(0xFF8A94A4),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    if (_sendingVoice)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+              )
+                  : TextField(
                 controller: widget.controller,
                 enabled: widget.enabled,
                 minLines: 1,
