@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -16,6 +17,53 @@ import 'package:geolocator/geolocator.dart';
 import 'package:battery_plus/battery_plus.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
+
+// ============================================================
+// LANGUAGE
+// ============================================================
+
+final ValueNotifier<bool> languageNotifier = ValueNotifier<bool>(false);
+
+String tr(String english, String tamil) {
+  return languageNotifier.value ? tamil : english;
+}
+
+String trStatus(String status) {
+  final foundMatch = RegExp(r'^(\d+) device\(s\) found$').firstMatch(status);
+  if (foundMatch != null) {
+    final count = foundMatch.group(1)!;
+    return languageNotifier.value
+        ? '$count சாதனங்கள் கிடைத்தன'
+        : '$count device(s) found';
+  }
+
+  switch (status) {
+    case 'Disconnected':
+      return tr('Disconnected', 'துண்டிக்கப்பட்டது');
+    case 'Checking Bluetooth...':
+      return tr('Checking Bluetooth...', 'ப்ளூடூத்தை சரிபார்க்கிறது...');
+    case 'Bluetooth is OFF':
+      return tr('Bluetooth is OFF', 'ப்ளூடூத் அணைக்கப்பட்டுள்ளது');
+    case 'Turn ON Location to scan Bluetooth':
+      return tr('Turn ON Location to scan Bluetooth', 'ப்ளூடூத் சாதனங்களைத் தேட இருப்பிடத்தை இயக்கவும்');
+    case 'Location permission required':
+      return tr('Location permission required', 'இருப்பிட அனுமதி தேவை');
+    case 'Scanning for devices...':
+      return tr('Scanning for devices...', 'சாதனங்களைத் தேடுகிறது...');
+    case 'No devices found':
+      return tr('No devices found', 'சாதனங்கள் எதுவும் கிடைக்கவில்லை');
+    case 'Scan failed':
+      return tr('Scan failed', 'தேடல் தோல்வியடைந்தது');
+    case 'Connecting...':
+      return tr('Connecting...', 'இணைக்கிறது...');
+    case 'Connected':
+      return tr('Connected', 'இணைக்கப்பட்டுள்ளது');
+    case 'Connection failed':
+      return tr('Connection failed', 'இணைப்பு தோல்வியடைந்தது');
+    default:
+      return status;
+  }
+}
 
 void main() {
   runApp(const LoraTrackerApp());
@@ -277,8 +325,7 @@ class _SplashScreenState extends State<SplashScreen>
                     ),
                   ),
                   const SizedBox(height: 9),
-                  const Text(
-                    'Track. Connect. Explore.',
+                  Text(tr('Track. Connect. Explore.', 'கண்காணி. இணை. ஆராய்.'),
                     style: TextStyle(
                       color: Color(0xFFB8D8EA),
                       fontSize: 14,
@@ -314,7 +361,7 @@ class _SplashScreenState extends State<SplashScreen>
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Establishing connection...',
+                        tr('Establishing connection...', 'இணைப்பை நிறுவுகிறது...'),
                         style: TextStyle(
                           color: Colors.white.withOpacity(0.72),
                           fontSize: 11,
@@ -324,10 +371,10 @@ class _SplashScreenState extends State<SplashScreen>
                     ],
                   ),
                   const Spacer(flex: 1),
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 24),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 24),
                     child: Text(
-                      'LONG RANGE • LOW POWER • CONNECTED',
+                      tr('LONG RANGE • LOW POWER • CONNECTED', 'நீண்ட தூரம் • குறைந்த மின்சாரம் • இணைக்கப்பட்டது'),
                       style: TextStyle(
                         color: Color(0xFF6E9AB3),
                         fontSize: 9,
@@ -1276,6 +1323,15 @@ class _DevicePageState extends State<DevicePage> {
   final List<ScanResult> scanResults = [];
   final Map<String, NodeInfo> nodes = {};
 
+  bool get isTamil => languageNotifier.value;
+
+  String get languageButtonText => isTamil ? 'English' : 'தமிழ்';
+
+  void _toggleLanguage() {
+    languageNotifier.value = !languageNotifier.value;
+    setState(() {});
+  }
+
   // Conversations are now observable notifiers instead of plain lists,
   // so whichever chat page is currently open updates itself the instant
   // a message arrives -- it no longer depends on DevicePage rebuilding.
@@ -1508,9 +1564,9 @@ class _DevicePageState extends State<DevicePage> {
           status = 'Turn ON Location to scan Bluetooth';
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Please turn ON Location in phone Settings, then scan again.',
+              tr('Please turn ON Location in phone Settings, then scan again.', 'தொலைபேசி அமைப்புகளில் இருப்பிடத்தை இயக்கி, மீண்டும் தேடவும்.'),
             ),
           ),
         );
@@ -2005,7 +2061,7 @@ class _DevicePageState extends State<DevicePage> {
 
       privateChats.putIfAbsent(nodeId, () => ChatNotifier()).add(message);
     } catch (e) {
-      _showSnack('Failed to send private message');
+      _showSnack(tr('Failed to send private message', 'தனிப்பட்ட செய்தியை அனுப்ப முடியவில்லை'));
       debugPrint('PRIVATE SEND ERROR: $e');
     }
   }
@@ -2035,7 +2091,7 @@ class _DevicePageState extends State<DevicePage> {
         ),
       );
     } catch (e) {
-      _showSnack('Failed to send common message');
+      _showSnack(tr('Failed to send common message', 'பொது செய்தியை அனுப்ப முடியவில்லை'));
       debugPrint('COMMON SEND ERROR: $e');
     }
   }
@@ -2056,7 +2112,7 @@ class _DevicePageState extends State<DevicePage> {
     try {
       final hasPermission = await _voiceRecorder.hasPermission();
       if (!hasPermission) {
-        _showSnack('Microphone permission is required to record voice messages');
+        _showSnack(tr('Microphone permission is required to record voice messages', 'குரல் செய்திகளைப் பதிவு செய்ய மைக்ரோஃபோன் அனுமதி தேவை'));
         return;
       }
 
@@ -2076,7 +2132,7 @@ class _DevicePageState extends State<DevicePage> {
       _isVoiceRecording = true;
     } catch (e) {
       debugPrint('VOICE RECORD START ERROR: $e');
-      _showSnack('Could not start recording');
+      _showSnack(tr('Could not start recording', 'பதிவைத் தொடங்க முடியவில்லை'));
     }
   }
 
@@ -2096,7 +2152,7 @@ class _DevicePageState extends State<DevicePage> {
       if (bytes.isEmpty) return;
 
       if (connectedDevice == null || rxCharacteristic == null) {
-        _showSnack('Not connected to a LoRa node');
+        _showSnack(tr('Not connected to a LoRa node', 'LoRa முனையுடன் இணைக்கப்படவில்லை'));
         return;
       }
 
@@ -2107,7 +2163,7 @@ class _DevicePageState extends State<DevicePage> {
       );
     } catch (e) {
       debugPrint('VOICE RECORD STOP ERROR: $e');
-      _showSnack('Failed to send voice message');
+      _showSnack(tr('Failed to send voice message', 'குரல் செய்தியை அனுப்ப முடியவில்லை'));
     }
   }
 
@@ -2165,7 +2221,7 @@ class _DevicePageState extends State<DevicePage> {
       }
     } catch (e) {
       debugPrint('VOICE SEND ERROR: $e');
-      _showSnack('Failed to send voice message');
+      _showSnack(tr('Failed to send voice message', 'குரல் செய்தியை அனுப்ப முடியவில்லை'));
     }
   }
 
@@ -2238,7 +2294,7 @@ class _DevicePageState extends State<DevicePage> {
 
       _addNotification(
         senderId: 'ESP32',
-        preview: 'Voice message',
+        preview: tr('Voice message', 'குரல் செய்தி'),
         isPrivate: false,
       );
 
@@ -2298,7 +2354,7 @@ class _DevicePageState extends State<DevicePage> {
 
   String getDeviceName(BluetoothDevice device) {
     final name = device.platformName;
-    return name.isNotEmpty ? name : 'ESP32 Device';
+    return name.isNotEmpty ? name : tr('ESP32 Device', 'ESP32 சாதனம்');
   }
 
   void _centerOnCurrentLocation() {
@@ -2352,7 +2408,7 @@ class _DevicePageState extends State<DevicePage> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            'Battery ${node.battery}%',
+                            tr('Battery ${node.battery}%', 'மின்கலம் ${node.battery}%'),
                             style: const TextStyle(
                               fontSize: 12,
                               color: Color(0xFF727C8D),
@@ -2369,15 +2425,15 @@ class _DevicePageState extends State<DevicePage> {
                     Expanded(
                       child: _InfoTile(
                         icon: Icons.signal_cellular_alt_rounded,
-                        label: 'RSSI',
-                        value: rssi == null ? 'N/A' : '$rssi dBm',
+                        label: tr('RSSI', 'சிக்னல்'),
+                        value: rssi == null ? tr('N/A', 'கிடைக்கவில்லை') : '$rssi dBm',
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: _InfoTile(
                         icon: Icons.location_on_outlined,
-                        label: 'Position',
+                        label: tr('Position', 'இருப்பிடம்'),
                         value:
                         '${node.latitude.toStringAsFixed(5)}, '
                             '${node.longitude.toStringAsFixed(5)}',
@@ -2397,14 +2453,14 @@ class _DevicePageState extends State<DevicePage> {
                       _openPrivateChat(node);
                     },
                     icon: const Icon(Icons.chat_bubble_outline_rounded),
-                    label: const Text('CHAT'),
+                    label: Text(tr('CHAT', 'அரட்டை')),
                   ),
                 ),
                 if (connectedDevice == null)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      'Connect the ESP32 over BLE before starting a chat.',
+                      tr('Connect the ESP32 over BLE before starting a chat.', 'அரட்டையைத் தொடங்குவதற்கு முன் ESP32-ஐ BLE மூலம் இணைக்கவும்.'),
                       style: TextStyle(
                         fontSize: 11,
                         color: Color(0xFF8A94A4),
@@ -2465,7 +2521,7 @@ class _DevicePageState extends State<DevicePage> {
               _openPrivateChat(node);
             } else {
               Navigator.pop(context);
-              _showSnack('Sender ${notification.senderId} is not currently on the map.');
+              _showSnack(tr('Sender ${notification.senderId} is not currently on the map.', 'அனுப்புநர் ${notification.senderId} தற்போது வரைபடத்தில் இல்லை.'));
             }
             if (mounted) setState(() {});
           },
@@ -2476,7 +2532,7 @@ class _DevicePageState extends State<DevicePage> {
 
   Widget _buildOfflineMap() {
     if (mapLoading) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -2487,7 +2543,7 @@ class _DevicePageState extends State<DevicePage> {
             ),
             SizedBox(height: 12),
             Text(
-              'Loading Sathya offline map...',
+              tr('Loading Sathya offline map...', 'Sathya ஆஃப்லைன் வரைபடத்தை ஏற்றுகிறது...'),
               style: TextStyle(
                 fontSize: 12,
                 color: Color(0xFF697487),
@@ -2512,8 +2568,7 @@ class _DevicePageState extends State<DevicePage> {
                 color: Color(0xFF9AA3B2),
               ),
               const SizedBox(height: 10),
-              const Text(
-                'Sathya offline map unavailable',
+              Text(tr('Sathya offline map unavailable', 'Sathya ஆஃப்லைன் வரைபடம் கிடைக்கவில்லை'),
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -2522,7 +2577,7 @@ class _DevicePageState extends State<DevicePage> {
               ),
               const SizedBox(height: 6),
               Text(
-                mapError ?? 'Unknown PMTiles error',
+                mapError ?? tr('Unknown PMTiles error', 'தெரியாத PMTiles பிழை'),
                 textAlign: TextAlign.center,
                 maxLines: 5,
                 overflow: TextOverflow.ellipsis,
@@ -2557,8 +2612,7 @@ class _DevicePageState extends State<DevicePage> {
                   color: const Color(0xFF1769E0),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: const Text(
-                  'YOU',
+                child: Text(tr('YOU', 'நீங்கள்'),
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 9,
@@ -2694,9 +2748,9 @@ class _DevicePageState extends State<DevicePage> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Connect LoRa Node',
+                    tr('Connect LoRa Node', 'LoRa முனையை இணைக்கவும்'),
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
@@ -2705,7 +2759,7 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ),
                 Text(
-                  '${scanResults.length} found',
+                  '${scanResults.length} ${tr('found', 'கிடைத்தது')}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFF7B8493),
@@ -2713,7 +2767,7 @@ class _DevicePageState extends State<DevicePage> {
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  tooltip: 'Scan',
+                  tooltip: tr('Scan', 'தேடுக'),
                   onPressed: isScanning ? null : startScan,
                   icon: const Icon(Icons.refresh_rounded),
                 ),
@@ -2745,7 +2799,7 @@ class _DevicePageState extends State<DevicePage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    status,
+                    trStatus(status),
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -2776,8 +2830,7 @@ class _DevicePageState extends State<DevicePage> {
                     color: Color(0xFF9AA3B2),
                   ),
                   const SizedBox(height: 7),
-                  const Text(
-                    'Scan and choose your ESP32 LoRa node',
+                  Text(tr('Scan and choose your ESP32 LoRa node', 'உங்கள் ESP32 LoRa முனையைத் தேடி தேர்ந்தெடுக்கவும்'),
                     style: TextStyle(
                       fontSize: 12,
                       color: Color(0xFF727C8D),
@@ -2786,7 +2839,7 @@ class _DevicePageState extends State<DevicePage> {
                   const SizedBox(height: 10),
                   OutlinedButton(
                     onPressed: isScanning ? null : startScan,
-                    child: const Text('SCAN'),
+                    child: Text(tr('SCAN', 'தேடுக')),
                   ),
                 ],
               ),
@@ -2844,7 +2897,7 @@ class _DevicePageState extends State<DevicePage> {
                             ? null
                             : () => connectToDevice(device),
                         child: Text(
-                          isConnecting ? '...' : 'CONNECT',
+                          isConnecting ? '...' : tr('CONNECT', 'இணைக்கவும்'),
                         ),
                       ),
                     ),
@@ -2879,7 +2932,7 @@ class _DevicePageState extends State<DevicePage> {
                   label: Text('$unreadNotifications'),
                   child: const Icon(Icons.notifications_none_rounded),
                 ),
-                label: const Text('Notifications'),
+                label: Text(tr('Notifications', 'அறிவிப்புகள்')),
               ),
             ),
             const SizedBox(width: 8),
@@ -2887,7 +2940,7 @@ class _DevicePageState extends State<DevicePage> {
               child: FilledButton.icon(
                 onPressed: _openCommonChat,
                 icon: const Icon(Icons.forum_outlined),
-                label: const Text('Common Chat'),
+                label: Text(tr('Common Chat', 'பொது அரட்டை')),
               ),
             ),
           ],
@@ -2910,6 +2963,16 @@ class _DevicePageState extends State<DevicePage> {
           ),
         ),
         actions: [
+          TextButton(
+            onPressed: _toggleLanguage,
+            child: Text(
+              languageButtonText,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF1769E0),
+              ),
+            ),
+          ),
           if (connected)
             IconButton(
               tooltip: 'BLE',
@@ -2948,7 +3011,7 @@ class _DevicePageState extends State<DevicePage> {
                                 disconnectDevice();
                               },
                               icon: const Icon(Icons.bluetooth_disabled),
-                              label: const Text('Disconnect'),
+                              label: Text(tr('Disconnect', 'துண்டிக்கவும்')),
                             ),
                           ),
                         ],
@@ -2960,7 +3023,7 @@ class _DevicePageState extends State<DevicePage> {
               icon: const Icon(Icons.bluetooth_connected_rounded),
             ),
           IconButton(
-            tooltip: 'Notifications',
+            tooltip: tr('Notifications', 'அறிவிப்புகள்'),
             onPressed: _openNotifications,
             icon: Badge(
               isLabelVisible: unreadNotifications > 0,
@@ -3143,7 +3206,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
             child: Center(
               child: Text(
                 widget.node.rssi == null
-                    ? 'RSSI N/A'
+                    ? tr('RSSI N/A', 'சிக்னல் கிடைக்கவில்லை')
                     : '${widget.node.rssi} dBm',
                 style: const TextStyle(fontSize: 11),
               ),
@@ -3161,7 +3224,7 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
             ),
             color: const Color(0xFFF5F7FA),
             child: Text(
-              'Private chat • ${widget.node.id}',
+              tr('Private chat • ${widget.node.id}', 'தனிப்பட்ட அரட்டை • ${widget.node.id}'),
               style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -3171,9 +3234,9 @@ class _PrivateChatPageState extends State<PrivateChatPage> {
           ),
           Expanded(
             child: messages.isEmpty
-                ? const Center(
+                ? Center(
               child: Text(
-                'No private messages yet',
+                tr('No private messages yet', 'தனிப்பட்ட செய்திகள் எதுவும் இல்லை'),
                 style: TextStyle(color: Color(0xFF8A94A4)),
               ),
             )
@@ -3271,7 +3334,7 @@ class _CommonChatPageState extends State<CommonChatPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Common Chat'),
+        title: Text(tr('Common Chat', 'பொது அரட்டை')),
         actions: const [
           Padding(
             padding: EdgeInsets.only(right: 14),
@@ -3288,8 +3351,7 @@ class _CommonChatPageState extends State<CommonChatPage> {
               vertical: 10,
             ),
             color: const Color(0xFFF5F7FA),
-            child: const Text(
-              'Messages from all LoRa nodes',
+            child: Text(tr('Messages from all LoRa nodes', 'அனைத்து LoRa முனைகளிலிருந்தும் செய்திகள்'),
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
@@ -3299,9 +3361,9 @@ class _CommonChatPageState extends State<CommonChatPage> {
           ),
           Expanded(
             child: messages.isEmpty
-                ? const Center(
+                ? Center(
               child: Text(
-                'No common messages yet',
+                tr('No common messages yet', 'பொது செய்திகள் எதுவும் இல்லை'),
                 style: TextStyle(color: Color(0xFF8A94A4)),
               ),
             )
@@ -3380,12 +3442,12 @@ class NotificationPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Notifications'),
+        title: Text(tr('Notifications', 'அறிவிப்புகள்')),
       ),
       body: notifications.isEmpty
-          ? const Center(
+          ? Center(
         child: Text(
-          'No notifications',
+          tr('No notifications', 'அறிவிப்புகள் எதுவும் இல்லை'),
           style: TextStyle(color: Color(0xFF8A94A4)),
         ),
       )
@@ -3417,8 +3479,8 @@ class NotificationPage extends StatelessWidget {
             ),
             title: Text(
               n.isPrivate
-                  ? 'Private message from ${n.senderId}'
-                  : 'Common message from ${n.senderId}',
+                  ? tr('Private message from ${n.senderId}', 'தனிப்பட்ட செய்தி • ${n.senderId}')
+                  : tr('Common message from ${n.senderId}', 'பொது செய்தி • ${n.senderId}'),
               style: const TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w700,
@@ -3535,7 +3597,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Voice message',
+                      tr('Voice message', 'குரல் செய்தி'),
                       style: TextStyle(
                         fontSize: 14,
                         color: message.fromMe
@@ -3725,8 +3787,8 @@ class _ComposerState extends State<_Composer> {
                     Expanded(
                       child: Text(
                         _sendingVoice
-                            ? 'Sharing voice message...'
-                            : 'Recording voice • ${_formatDuration(_recordingDuration)}',
+                            ? tr('Sharing voice message...', 'குரல் செய்தியைப் பகிர்கிறது...')
+                            : tr('Recording voice • ${_formatDuration(_recordingDuration)}', 'குரலைப் பதிவு செய்கிறது • ${_formatDuration(_recordingDuration)}'),
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
@@ -3737,8 +3799,7 @@ class _ComposerState extends State<_Composer> {
                       ),
                     ),
                     if (_recording)
-                      const Text(
-                        'Release to send',
+                      Text(tr('Release to send', 'அனுப்ப விடுங்கள்'),
                         style: TextStyle(
                           fontSize: 10,
                           color: Color(0xFF8A94A4),
@@ -3762,8 +3823,8 @@ class _ComposerState extends State<_Composer> {
                 textInputAction: TextInputAction.newline,
                 decoration: InputDecoration(
                   hintText: _recording
-                      ? 'Recording... release to send'
-                      : 'Type a message...',
+                      ? tr('Recording... release to send', 'பதிவு செய்கிறது... அனுப்ப விடுங்கள்')
+                      : tr('Type a message...', 'செய்தியை உள்ளிடவும்...'),
                   contentPadding: const EdgeInsets.symmetric(
                     horizontal: 15,
                     vertical: 11,
