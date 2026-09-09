@@ -7,6 +7,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:flutter_classic_bluetooth/flutter_classic_bluetooth.dart' as classic;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_vector_tiles/flutter_map_vector_tiles.dart'
 as vt;
@@ -1359,6 +1360,26 @@ class _DevicePageState extends State<DevicePage> {
   BluetoothDevice? connectedDevice;
   BluetoothCharacteristic? rxCharacteristic;
   BluetoothCharacteristic? txCharacteristic;
+  // ============================================================
+  // BLUETOOTH CLASSIC - HC-05
+  // ============================================================
+  // Classic Bluetooth uses RFCOMM/SPP. It is deliberately kept
+  // separate from the existing flutter_blue_plus BLE objects.
+  // Both transports are exposed through the same scan button/panel.
+  // ============================================================
+
+  final classic.FlutterClassicBluetooth _classicBluetooth =
+  classic.FlutterClassicBluetooth();
+
+  List<classic.BtcDevice> classicDevices = [];
+
+  classic.BtcConnection? connectedClassicConnection;
+  String? connectedClassicAddress;
+
+  StreamSubscription<dynamic>? classicDataSubscription;
+
+  bool isClassicScanning = false;
+  bool isClassicConnecting = false;
 
   String status = 'Disconnected';
   bool isScanning = false;
@@ -1537,11 +1558,13 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   Future<void> startScan() async {
-    if (isScanning) return;
+    if (isScanning || isClassicScanning) return;
 
     setState(() {
       scanResults.clear();
+      classicDevices.clear();
       isScanning = true;
+      isClassicScanning = true;
       status = 'Checking Bluetooth...';
     });
 
@@ -1551,6 +1574,7 @@ class _DevicePageState extends State<DevicePage> {
         if (mounted) {
           setState(() {
             isScanning = false;
+            isClassicScanning = false;
             status = 'Bluetooth is OFF';
           });
         }
@@ -1561,12 +1585,16 @@ class _DevicePageState extends State<DevicePage> {
       if (!locationEnabled && mounted) {
         setState(() {
           isScanning = false;
+          isClassicScanning = false;
           status = 'Turn ON Location to scan Bluetooth';
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              tr('Please turn ON Location in phone Settings, then scan again.', 'தொலைபேசி அமைப்புகளில் இருப்பிடத்தை இயக்கி, மீண்டும் தேடவும்.'),
+              tr(
+                'Please turn ON Location in phone Settings, then scan again.',
+                'தொலைபேசி அமைப்புகளில் இருப்பிடத்தை இயக்கி, மீண்டும் தேடவும்.',
+              ),
             ),
           ),
         );
@@ -1583,6 +1611,7 @@ class _DevicePageState extends State<DevicePage> {
         if (mounted) {
           setState(() {
             isScanning = false;
+            isClassicScanning = false;
             status = 'Location permission required';
           });
         }
@@ -1591,26 +1620,209 @@ class _DevicePageState extends State<DevicePage> {
 
       if (mounted) setState(() => status = 'Scanning for devices...');
 
+      // ONE button starts both discovery mechanisms.
+      final classicScanFuture = _scanClassicDevices();
+
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 5),
         androidUsesFineLocation: true,
       );
 
+      await classicScanFuture;
+
       if (!mounted) return;
+
+      final total = scanResults.length + classicDevices.length;
       setState(() {
         isScanning = false;
-        status = scanResults.isEmpty
-            ? 'No devices found'
-            : '${scanResults.length} device(s) found';
+        isClassicScanning = false;
+        status = total == 0 ? 'No devices found' : '$total device(s) found';
       });
     } catch (e, stackTrace) {
-      debugPrint('SCAN ERROR: $e');
+      debugPrint('COMBINED BLUETOOTH SCAN ERROR: $e');
       debugPrint(stackTrace.toString());
+
+      try {
+        await FlutterBluePlus.stopScan();
+      } catch (_) {}
+
+      try {
+        await _classicBluetooth.stopDiscovery();
+      } catch (_) {}
+
       if (!mounted) return;
+
+      final total = scanResults.length + classicDevices.length;
       setState(() {
         isScanning = false;
-        status = 'Scan failed';
+        isClassicScanning = false;
+        status = total == 0 ? 'Scan failed' : '$total device(s) found';
       });
+    }
+  }
+
+  Future<void> _scanClassicDevices() async {
+    try {
+      debugPrint('CLASSIC BT: Checking permissions...');
+
+      var permissionStatus = await _classicBluetooth.checkPermissions(
+        permissions: {
+          classic.BtcPermission.scan,
+          classic.BtcPermission.connect,
+        },
+      );
+
+      if (permissionStatus == classic.BtcPermissionStatus.denied) {
+        permissionStatus = await _classicBluetooth.requestPermissions(
+          permissions: {
+            classic.BtcPermission.scan,
+            classic.BtcPermission.connect,
+          },
+        );
+      }
+
+      if (permissionStatus == classic.BtcPermissionStatus.permanentlyDenied) {
+        debugPrint('CLASSIC BT: Bluetooth permission permanently denied');
+        return;
+      }
+
+      if (permissionStatus != classic.BtcPermissionStatus.granted &&
+          permissionStatus != classic.BtcPermissionStatus.notRequired) {
+        debugPrint('CLASSIC BT: Bluetooth permission not available');
+        return;
+      }
+
+      if (await _classicBluetooth.isLocationServiceRequired() &&
+          !await _classicBluetooth.isLocationServiceEnabled()) {
+        debugPrint('CLASSIC BT: Android location service is required');
+        return;
+      }
+
+      if (!await _classicBluetooth.isSupported()) {
+        debugPrint('CLASSIC BT: Not supported on this device');
+        return;
+      }
+
+      if (!await _classicBluetooth.isEnabled()) {
+        debugPrint('CLASSIC BT: Bluetooth adapter is OFF');
+        return;
+      }
+
+      final devices = await _classicBluetooth.scan(
+        timeout: const Duration(seconds: 8),
+      );
+
+      if (!mounted) return;
+
+      final unique = <String, classic.BtcDevice>{};
+      for (final device in devices) {
+        unique[device.address] = device;
+      }
+
+      setState(() {
+        classicDevices = unique.values.toList();
+      });
+
+      for (final device in classicDevices) {
+        debugPrint(
+          'CLASSIC BT DEVICE: ${device.displayName} '
+              '${device.address} RSSI=${device.rssi}',
+        );
+      }
+
+      debugPrint(
+        'CLASSIC BT: Found ${classicDevices.length} device(s)',
+      );
+    } catch (e, stackTrace) {
+      debugPrint('CLASSIC BT SCAN ERROR: $e');
+      debugPrint(stackTrace.toString());
+    } finally {
+      if (mounted) {
+        setState(() => isClassicScanning = false);
+      }
+    }
+  }
+
+  Future<void> connectClassicDevice(classic.BtcDevice device) async {
+    if (isClassicConnecting) return;
+
+    setState(() {
+      isClassicConnecting = true;
+      status = 'Connecting...';
+    });
+
+    try {
+      debugPrint(
+        'CLASSIC BT: Connecting to '
+            '${device.displayName} ${device.address}',
+      );
+
+      final connection = await _classicBluetooth.connect(
+        address: device.address,
+        uuid: classic.BtcUuid.spp,
+        timeout: const Duration(seconds: 15),
+      );
+
+      connectedClassicConnection = connection;
+      connectedClassicAddress = device.address;
+
+      debugPrint('CLASSIC BT: CONNECTED');
+
+      await classicDataSubscription?.cancel();
+      classicDataSubscription = connection.input.listen(
+            (data) {
+          if (data.isEmpty) return;
+
+          debugPrint('CLASSIC BT RX: ${data.length} bytes');
+          handleIncomingBluetoothData(data);
+        },
+        onError: (e) => debugPrint('CLASSIC BT RX ERROR: $e'),
+        onDone: () {
+          debugPrint('CLASSIC BT RX: connection closed');
+          if (!mounted) return;
+
+          _stopLocationSharing();
+
+          setState(() {
+            connectedClassicConnection = null;
+            connectedClassicAddress = null;
+            status = 'Disconnected';
+            showBlePanel = true;
+          });
+        },
+        cancelOnError: false,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        isClassicConnecting = false;
+        status = 'Connected';
+        showBlePanel = false;
+      });
+
+      await _startLocationSharing();
+    } catch (e, stackTrace) {
+      debugPrint('CLASSIC BT CONNECTION ERROR: $e');
+      debugPrint(stackTrace.toString());
+
+      await classicDataSubscription?.cancel();
+      classicDataSubscription = null;
+
+      try {
+        await connectedClassicConnection?.close();
+      } catch (_) {}
+
+      connectedClassicConnection = null;
+      connectedClassicAddress = null;
+
+      if (mounted) {
+        setState(() {
+          isClassicConnecting = false;
+          status = 'Connection failed';
+          showBlePanel = true;
+        });
+      }
     }
   }
 
@@ -1634,6 +1846,13 @@ class _DevicePageState extends State<DevicePage> {
       );
 
       connectedDevice = device;
+
+      try {
+        await device.requestMtu(247);
+      } catch (e) {
+        debugPrint('MTU REQUEST FAILED: $e');
+      }
+
       await connectionSubscription?.cancel();
       connectionSubscription = device.connectionState.listen((state) {
         if (!mounted) return;
@@ -1726,6 +1945,18 @@ class _DevicePageState extends State<DevicePage> {
     // may contain a partial frame, one complete frame, or several frames.
     _voiceRxBuffer.addAll(value);
     _processIncomingBleBuffer();
+  }
+
+  // ============================================================
+// COMMON BLUETOOTH RX HANDLER
+// ============================================================
+
+  void handleIncomingBluetoothData(List<int> data) {
+    if (data.isEmpty) return;
+
+    // Use the exact same processing path
+    // that your BLE connection already uses.
+    handleIncomingBleData(data);
   }
 
   int _findMagic(List<int> data, int start) {
@@ -1967,8 +2198,33 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
+  bool get _bluetoothTransportConnected =>
+      (connectedDevice != null && rxCharacteristic != null) ||
+          connectedClassicConnection != null;
+
+  Future<void> _writeBluetoothBytes(
+      List<int> data, {
+        bool withoutResponse = false,
+      }) async {
+    if (rxCharacteristic != null) {
+      await rxCharacteristic!.write(
+        data,
+        withoutResponse: withoutResponse,
+      );
+      return;
+    }
+
+    final connection = connectedClassicConnection;
+    if (connection != null) {
+      await connection.output.writeBytes(data);
+      return;
+    }
+
+    throw Exception('No Bluetooth transport connected');
+  }
+
   Future<void> _startLocationSharing() async {
-    if (rxCharacteristic == null) return;
+    if (!_bluetoothTransportConnected) return;
 
     final ready = await _prepareLocationPermission();
     if (!ready) return;
@@ -1991,9 +2247,7 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   Future<void> _sendCurrentLocation() async {
-    if (locationSending ||
-        connectedDevice == null ||
-        rxCharacteristic == null) {
+    if (locationSending || !_bluetoothTransportConnected) {
       return;
     }
 
@@ -2023,7 +2277,7 @@ class _DevicePageState extends State<DevicePage> {
           '${position.longitude.toStringAsFixed(6)},'
           '$timestamp,$batteryLevel';
 
-      await rxCharacteristic!.write(
+      await _writeBluetoothBytes(
         utf8.encode(packet),
         withoutResponse: false,
       );
@@ -2036,7 +2290,7 @@ class _DevicePageState extends State<DevicePage> {
 
   Future<void> sendPrivateText(String nodeId, String text) async {
     text = text.trim();
-    if (text.isEmpty || rxCharacteristic == null) return;
+    if (text.isEmpty || !_bluetoothTransportConnected) return;
 
     final packet = RoutingPacket.privateText(
       from: mobileDeviceId,
@@ -2045,7 +2299,7 @@ class _DevicePageState extends State<DevicePage> {
     );
 
     try {
-      await rxCharacteristic!.write(
+      await _writeBluetoothBytes(
         utf8.encode(packet),
         withoutResponse: false,
       );
@@ -2068,7 +2322,7 @@ class _DevicePageState extends State<DevicePage> {
 
   Future<void> sendCommonText(String text) async {
     text = text.trim();
-    if (text.isEmpty || rxCharacteristic == null) return;
+    if (text.isEmpty || !_bluetoothTransportConnected) return;
 
     final packet = RoutingPacket.commonText(
       from: mobileDeviceId,
@@ -2076,7 +2330,7 @@ class _DevicePageState extends State<DevicePage> {
     );
 
     try {
-      await rxCharacteristic!.write(
+      await _writeBluetoothBytes(
         utf8.encode(packet),
         withoutResponse: false,
       );
@@ -2151,7 +2405,7 @@ class _DevicePageState extends State<DevicePage> {
       final bytes = await file.readAsBytes();
       if (bytes.isEmpty) return;
 
-      if (connectedDevice == null || rxCharacteristic == null) {
+      if (!_bluetoothTransportConnected) {
         _showSnack(tr('Not connected to a LoRa node', 'LoRa முனையுடன் இணைக்கப்படவில்லை'));
         return;
       }
@@ -2191,7 +2445,7 @@ class _DevicePageState extends State<DevicePage> {
           payload: bytes.sublist(start, end),
         );
 
-        await rxCharacteristic!.write(
+        await _writeBluetoothBytes(
           packet.encode(),
           withoutResponse: false,
         );
@@ -2222,6 +2476,25 @@ class _DevicePageState extends State<DevicePage> {
     } catch (e) {
       debugPrint('VOICE SEND ERROR: $e');
       _showSnack(tr('Failed to send voice message', 'குரல் செய்தியை அனுப்ப முடியவில்லை'));
+    }
+  }
+
+  // ============================================================
+// CLASSIC BLUETOOTH TX
+// ============================================================
+
+  Future<void> sendClassicBytes(List<int> data) async {
+    final connection = connectedClassicConnection;
+    if (connection == null) {
+      throw Exception('Classic Bluetooth device not connected');
+    }
+
+    try {
+      await connection.output.writeBytes(data);
+      debugPrint('CLASSIC BT TX: ${data.length} bytes');
+    } catch (e) {
+      debugPrint('CLASSIC BT TX ERROR: $e');
+      rethrow;
     }
   }
 
@@ -2305,6 +2578,26 @@ class _DevicePageState extends State<DevicePage> {
     }
   }
 
+  Future<void> cleanupClassicBluetooth() async {
+    await classicDataSubscription?.cancel();
+    classicDataSubscription = null;
+
+    final connection = connectedClassicConnection;
+    connectedClassicConnection = null;
+    connectedClassicAddress = null;
+
+    if (connection != null) {
+      try {
+        await connection.finish();
+      } catch (_) {
+        try {
+          await connection.close();
+        } catch (_) {}
+      }
+      connection.dispose();
+    }
+  }
+
   Future<void> cleanupBle() async {
     await notificationSubscription?.cancel();
     notificationSubscription = null;
@@ -2328,6 +2621,7 @@ class _DevicePageState extends State<DevicePage> {
     _stopLocationSharing();
     final device = connectedDevice;
 
+    await cleanupClassicBluetooth();
     await cleanupBle();
 
     if (device != null) {
@@ -2350,6 +2644,11 @@ class _DevicePageState extends State<DevicePage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(text)),
     );
+  }
+
+  String getClassicDeviceName(classic.BtcDevice device) {
+    final name = device.displayName.trim();
+    return name.isNotEmpty ? name : 'HC-05 / Classic Device';
   }
 
   String getDeviceName(BluetoothDevice device) {
@@ -2446,7 +2745,7 @@ class _DevicePageState extends State<DevicePage> {
                   width: double.infinity,
                   height: 48,
                   child: FilledButton.icon(
-                    onPressed: connectedDevice == null
+                    onPressed: !_bluetoothTransportConnected
                         ? null
                         : () {
                       Navigator.pop(context);
@@ -2460,7 +2759,7 @@ class _DevicePageState extends State<DevicePage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      tr('Connect the ESP32 over BLE before starting a chat.', 'அரட்டையைத் தொடங்குவதற்கு முன் ESP32-ஐ BLE மூலம் இணைக்கவும்.'),
+                      tr('Connect a LoRa node over Bluetooth before starting a chat.', 'அரட்டையைத் தொடங்குவதற்கு முன் LoRa முனையை Bluetooth மூலம் இணைக்கவும்.'),
                       style: TextStyle(
                         fontSize: 11,
                         color: Color(0xFF8A94A4),
@@ -2487,7 +2786,7 @@ class _DevicePageState extends State<DevicePage> {
               _startVoiceRecording(privateTarget: node.id),
           onVoiceHoldEnd: () =>
               _stopVoiceRecordingAndSend(privateTarget: node.id),
-          connected: connectedDevice != null && rxCharacteristic != null,
+          connected: _bluetoothTransportConnected,
         ),
       ),
     );
@@ -2502,7 +2801,7 @@ class _DevicePageState extends State<DevicePage> {
           sendText: sendCommonText,
           onVoiceHoldStart: _startVoiceRecording,
           onVoiceHoldEnd: _stopVoiceRecordingAndSend,
-          connected: connectedDevice != null && rxCharacteristic != null,
+          connected: _bluetoothTransportConnected,
         ),
       ),
     );
@@ -2734,6 +3033,9 @@ class _DevicePageState extends State<DevicePage> {
   }
 
   Widget _buildBlePanel() {
+    final totalFound = scanResults.length + classicDevices.length;
+    final isAnyScanning = isScanning || isClassicScanning;
+
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -2751,7 +3053,7 @@ class _DevicePageState extends State<DevicePage> {
                 Expanded(
                   child: Text(
                     tr('Connect LoRa Node', 'LoRa முனையை இணைக்கவும்'),
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
                       color: Color(0xFF202A3A),
@@ -2759,7 +3061,7 @@ class _DevicePageState extends State<DevicePage> {
                   ),
                 ),
                 Text(
-                  '${scanResults.length} ${tr('found', 'கிடைத்தது')}',
+                  '$totalFound ${tr('found', 'கிடைத்தது')}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFF7B8493),
@@ -2768,7 +3070,7 @@ class _DevicePageState extends State<DevicePage> {
                 const SizedBox(width: 8),
                 IconButton(
                   tooltip: tr('Scan', 'தேடுக'),
-                  onPressed: isScanning ? null : startScan,
+                  onPressed: isAnyScanning ? null : startScan,
                   icon: const Icon(Icons.refresh_rounded),
                 ),
               ],
@@ -2791,7 +3093,8 @@ class _DevicePageState extends State<DevicePage> {
                   height: 8,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: connectedDevice != null
+                    color: connectedDevice != null ||
+                        connectedClassicConnection != null
                         ? Colors.green
                         : Colors.grey,
                   ),
@@ -2807,7 +3110,7 @@ class _DevicePageState extends State<DevicePage> {
                     ),
                   ),
                 ),
-                if (isScanning)
+                if (isAnyScanning)
                   const SizedBox(
                     width: 16,
                     height: 16,
@@ -2819,7 +3122,7 @@ class _DevicePageState extends State<DevicePage> {
           const SizedBox(height: 8),
           SizedBox(
             height: 190,
-            child: scanResults.isEmpty
+            child: totalFound == 0
                 ? Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -2830,15 +3133,19 @@ class _DevicePageState extends State<DevicePage> {
                     color: Color(0xFF9AA3B2),
                   ),
                   const SizedBox(height: 7),
-                  Text(tr('Scan and choose your ESP32 LoRa node', 'உங்கள் ESP32 LoRa முனையைத் தேடி தேர்ந்தெடுக்கவும்'),
-                    style: TextStyle(
+                  Text(
+                    tr(
+                      'Scan and choose your ESP32 LoRa node',
+                      'உங்கள் ESP32 LoRa முனையைத் தேடி தேர்ந்தெடுக்கவும்',
+                    ),
+                    style: const TextStyle(
                       fontSize: 12,
                       color: Color(0xFF727C8D),
                     ),
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton(
-                    onPressed: isScanning ? null : startScan,
+                    onPressed: isAnyScanning ? null : startScan,
                     child: Text(tr('SCAN', 'தேடுக')),
                   ),
                 ],
@@ -2846,12 +3153,90 @@ class _DevicePageState extends State<DevicePage> {
             )
                 : ListView.builder(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-              itemCount: scanResults.length,
+              itemCount: totalFound,
               itemBuilder: (context, index) {
-                final result = scanResults[index];
-                final device = result.device;
+                if (index < scanResults.length) {
+                  final result = scanResults[index];
+                  final device = result.device;
+                  final isConnected =
+                      connectedDevice?.remoteId == device.remoteId;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 7),
+                    child: ListTile(
+                      dense: true,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: const BorderSide(
+                          color: Color(0xFFE4E9EF),
+                        ),
+                      ),
+                      leading: const CircleAvatar(
+                        backgroundColor: Color(0xFFEFF4FC),
+                        child: Icon(
+                          Icons.developer_board_outlined,
+                          color: Color(0xFF1769E0),
+                        ),
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              getDeviceName(device),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text(
+                            'BLE',
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w800,
+                              color: Color(0xFF1769E0),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: Text(
+                        '${device.remoteId} • ${result.rssi} dBm',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 10),
+                      ),
+                      trailing: isConnected
+                          ? const Icon(
+                        Icons.check_circle_rounded,
+                        color: Colors.green,
+                      )
+                          : SizedBox(
+                        height: 34,
+                        child: ElevatedButton(
+                          onPressed: isConnecting
+                              ? null
+                              : () => connectToDevice(device),
+                          child: Text(
+                            isConnecting
+                                ? '...'
+                                : tr(
+                              'CONNECT',
+                              'இணைக்கவும்',
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                final classicIndex = index - scanResults.length;
+                final device = classicDevices[classicIndex];
                 final isConnected =
-                    connectedDevice?.remoteId == device.remoteId;
+                    connectedClassicAddress == device.address;
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 7),
@@ -2864,23 +3249,39 @@ class _DevicePageState extends State<DevicePage> {
                       ),
                     ),
                     leading: const CircleAvatar(
-                      backgroundColor: Color(0xFFEFF4FC),
+                      backgroundColor: Color(0xFFE8F7EF),
                       child: Icon(
-                        Icons.developer_board_outlined,
-                        color: Color(0xFF1769E0),
+                        Icons.bluetooth_rounded,
+                        color: Colors.green,
                       ),
                     ),
-                    title: Text(
-                      getDeviceName(device),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            getClassicDeviceName(device),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        const Text(
+                          'CLASSIC',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
                     ),
                     subtitle: Text(
-                      '${device.remoteId} • ${result.rssi} dBm',
+                      '${device.address}'
+                          '${device.rssi == null ? '' : ' • ${device.rssi} dBm'}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(fontSize: 10),
@@ -2893,11 +3294,16 @@ class _DevicePageState extends State<DevicePage> {
                         : SizedBox(
                       height: 34,
                       child: ElevatedButton(
-                        onPressed: isConnecting
+                        onPressed: isClassicConnecting
                             ? null
-                            : () => connectToDevice(device),
+                            : () => connectClassicDevice(device),
                         child: Text(
-                          isConnecting ? '...' : tr('CONNECT', 'இணைக்கவும்'),
+                          isClassicConnecting
+                              ? '...'
+                              : tr(
+                            'CONNECT',
+                            'இணைக்கவும்',
+                          ),
                         ),
                       ),
                     ),
@@ -2951,7 +3357,7 @@ class _DevicePageState extends State<DevicePage> {
 
   @override
   Widget build(BuildContext context) {
-    final connected = connectedDevice != null;
+    final connected = connectedDevice != null || connectedClassicConnection != null;
 
     return Scaffold(
       appBar: AppBar(
@@ -2975,7 +3381,7 @@ class _DevicePageState extends State<DevicePage> {
           ),
           if (connected)
             IconButton(
-              tooltip: 'BLE',
+              tooltip: 'Bluetooth',
               onPressed: () {
                 showModalBottomSheet<void>(
                   context: context,
@@ -2986,21 +3392,38 @@ class _DevicePageState extends State<DevicePage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          ListTile(
-                            leading: const Icon(
-                              Icons.bluetooth_connected_rounded,
-                              color: Colors.green,
-                            ),
-                            title: Text(
-                              getDeviceName(connectedDevice!),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
+                          if (connectedDevice != null)
+                            ListTile(
+                              leading: const Icon(
+                                Icons.bluetooth_connected_rounded,
+                                color: Colors.green,
+                              ),
+                              title: Text(
+                                getDeviceName(connectedDevice!),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text(
+                                connectedDevice!.remoteId.toString(),
                               ),
                             ),
-                            subtitle: Text(
-                              connectedDevice!.remoteId.toString(),
+                          if (connectedClassicConnection != null)
+                            ListTile(
+                              leading: const Icon(
+                                Icons.bluetooth_connected_rounded,
+                                color: Colors.green,
+                              ),
+                              title: const Text(
+                                'Classic Bluetooth',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              subtitle: Text(
+                                connectedClassicAddress ?? 'HC-05',
+                              ),
                             ),
-                          ),
                           const SizedBox(height: 8),
                           SizedBox(
                             width: double.infinity,
@@ -3011,7 +3434,9 @@ class _DevicePageState extends State<DevicePage> {
                                 disconnectDevice();
                               },
                               icon: const Icon(Icons.bluetooth_disabled),
-                              label: Text(tr('Disconnect', 'துண்டிக்கவும்')),
+                              label: Text(
+                                tr('Disconnect', 'துண்டிக்கவும்'),
+                              ),
                             ),
                           ),
                         ],
@@ -3054,6 +3479,13 @@ class _DevicePageState extends State<DevicePage> {
     scanSubscription?.cancel();
     connectionSubscription?.cancel();
     notificationSubscription?.cancel();
+    classicDataSubscription?.cancel();
+    final classicConnection = connectedClassicConnection;
+    connectedClassicConnection = null;
+    if (classicConnection != null) {
+      classicConnection.close();
+      classicConnection.dispose();
+    }
     _cancelVoiceRxBufferTimeout();
     for (final timer in _incomingVoiceTimeouts.values) {
       timer.cancel();

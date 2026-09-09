@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
 
   flutter_blue_plus: ^2.3.12
+  flutter_classic_bluetooth: ^1.2.0
   flutter_map: ^8.3.1
   flutter_map_vector_tiles: ^2.8.1
   pmtiles: ^2.2.0
