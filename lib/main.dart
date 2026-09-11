@@ -2322,19 +2322,19 @@ class _DevicePageState extends State<DevicePage> {
 
   Future<void> sendCommonText(String text) async {
     text = text.trim();
-    if (text.isEmpty || !_bluetoothTransportConnected) return;
 
-    final packet = RoutingPacket.commonText(
-      from: mobileDeviceId,
-      text: text,
-    );
+    if (text.isEmpty || !_bluetoothTransportConnected) {
+      return;
+    }
 
     try {
+      // Send RAW TEXT to VEGA + HC-05
       await _writeBluetoothBytes(
-        utf8.encode(packet),
+        utf8.encode(text),
         withoutResponse: false,
       );
 
+      // Show the message in the app
       commonChat.add(
         ChatMessage(
           id: '${DateTime.now().microsecondsSinceEpoch}',
@@ -2344,9 +2344,18 @@ class _DevicePageState extends State<DevicePage> {
           time: DateTime.now(),
         ),
       );
+
+      debugPrint('VEGA CLASSIC BT TX: $text');
+
     } catch (e) {
-      _showSnack(tr('Failed to send common message', 'பொது செய்தியை அனுப்ப முடியவில்லை'));
-      debugPrint('COMMON SEND ERROR: $e');
+      _showSnack(
+        tr(
+          'Failed to send message',
+          'செய்தியை அனுப்ப முடியவில்லை',
+        ),
+      );
+
+      debugPrint('VEGA CLASSIC BT SEND ERROR: $e');
     }
   }
 
